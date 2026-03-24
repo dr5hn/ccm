@@ -592,6 +592,19 @@ get_mtime() {
 
 # Purpose: Converts epoch seconds to human-readable relative time string
 # Parameters: $1 — epoch seconds (timestamp)
+# Purpose: Formats an ISO 8601 timestamp to a local display format (cross-platform)
+# Parameters: $1 — ISO timestamp (e.g. "2026-03-24T12:00:00Z")
+# Returns: Formatted string (e.g. "2026-03-24 12:00") or raw input on failure
+format_iso_date() {
+    local iso="$1"
+    local platform
+    platform=$(detect_platform)
+    case "$platform" in
+        macos) date -j -f "%Y-%m-%dT%H:%M:%SZ" "$iso" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$iso" ;;
+        *)     date -d "$iso" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$iso" ;;
+    esac
+}
+
 # Returns: Prints relative time string (e.g. "2 hours ago")
 # Usage: relative=$(format_relative_time "$epoch_seconds")
 format_relative_time() {
@@ -1060,22 +1073,11 @@ cmd_remove_account() {
 
     migrate_sequence_file
 
-    # Handle email vs numeric identifier
-    if [[ "$identifier" =~ ^[0-9]+$ ]]; then
-        account_num="$identifier"
-    else
-        # Validate email format
-        if ! validate_email "$identifier"; then
-            log_error "Invalid email format: $identifier"
-            exit 1
-        fi
-
-        # Resolve email to account number
-        account_num=$(resolve_account_identifier "$identifier")
-        if [[ -z "$account_num" ]]; then
-            log_error "No account found with email: $identifier"
-            exit 1
-        fi
+    # Resolve identifier (number, email, or alias)
+    account_num=$(resolve_account_identifier "$identifier")
+    if [[ -z "$account_num" ]]; then
+        log_error "No account found matching: $identifier"
+        exit 1
     fi
 
     local account_info
@@ -1207,7 +1209,7 @@ cmd_list() {
         local metadata=""
         if [[ -n "$last_used" && "$last_used" != "null" ]]; then
             local last_used_formatted
-            last_used_formatted=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_used" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_used")
+            last_used_formatted=$(format_iso_date "$last_used")
             metadata+="     Last used: $last_used_formatted"
         fi
 
@@ -1477,19 +1479,11 @@ cmd_set_alias() {
 
     migrate_sequence_file
 
-    # Resolve identifier to account number
-    if [[ "$identifier" =~ ^[0-9]+$ ]]; then
-        account_num="$identifier"
-    else
-        if ! validate_email "$identifier"; then
-            log_error "Invalid email format: $identifier"
-            exit 1
-        fi
-        account_num=$(resolve_account_identifier "$identifier")
-        if [[ -z "$account_num" ]]; then
-            log_error "No account found with email: $identifier"
-            exit 1
-        fi
+    # Resolve identifier (number, email, or alias)
+    account_num=$(resolve_account_identifier "$identifier")
+    if [[ -z "$account_num" ]]; then
+        log_error "No account found matching: $identifier"
+        exit 1
     fi
 
     # Validate account exists
@@ -1640,7 +1634,7 @@ cmd_status() {
 
             if [[ "$last_used" != "unknown" && "$last_used" != "null" ]]; then
                 local last_used_formatted
-                last_used_formatted=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$last_used" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$last_used")
+                last_used_formatted=$(format_iso_date "$last_used")
                 echo -e "  Last used: $last_used_formatted"
             fi
 
@@ -1699,7 +1693,7 @@ cmd_history() {
         to_email=$(jq -r --arg num "$to_num" '.accounts["\($num)"].email // "Unknown"' "$SEQUENCE_FILE")
 
         local time_formatted
-        time_formatted=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$timestamp" "+%Y-%m-%d %H:%M" 2>/dev/null || echo "$timestamp")
+        time_formatted=$(format_iso_date "$timestamp")
 
         echo -e "  ${COLOR_CYAN}→${COLOR_RESET} $time_formatted: Account-$from_num ($from_email) → Account-$to_num ($to_email)"
     done
@@ -2125,6 +2119,7 @@ cmd_interactive() {
 
         echo -e "${COLOR_BOLD}Available Accounts:${COLOR_RESET}"
         local idx=1
+        unset account_map
         declare -A account_map
         while IFS= read -r line; do
             local num email alias is_active
@@ -2718,7 +2713,7 @@ env_audit() {
         return 0
     fi
 
-    echo -e "${COLOR_BOLD}MCP Server Audit${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}Token Efficiency Audit${COLOR_RESET}"
     echo ""
 
     local replaceable_count=0
@@ -2741,7 +2736,7 @@ env_audit() {
                 echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} ${COLOR_BOLD}$server${COLOR_RESET}"
                 echo "    CLI alternative: $cli_alt"
                 echo "    Reason: $reason"
-                echo "    Estimated token savings: $savings_str tokens/session"
+                echo "    Estimated token savings: $savings_str tokens/request"
                 echo ""
 
                 replaceable_count=$((replaceable_count + 1))
@@ -2759,7 +2754,7 @@ env_audit() {
     echo -e "${COLOR_BOLD}Summary:${COLOR_RESET}"
     if [[ "$replaceable_count" -gt 0 ]]; then
         echo -e "  $replaceable_count server(s) could be replaced with CLI alternatives"
-        echo -e "  Estimated total savings: ~$total_savings tokens/session"
+        echo -e "  Estimated total savings: ~$total_savings tokens/request"
     else
         echo -e "  All MCP servers appear necessary. No replacements suggested."
     fi

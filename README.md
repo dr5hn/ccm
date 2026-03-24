@@ -42,8 +42,7 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 ## Installation
 
 ```bash
-curl -O https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh
-chmod +x ccm.sh
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ccm.sh && chmod +x ccm.sh
 ```
 
 ### Requirements
@@ -89,7 +88,7 @@ After each switch, restart Claude Code to use the new authentication.
 ccm add                        # Add current Claude Code account
 ccm remove <email|alias|num>   # Remove a managed account
 ccm switch                     # Switch to next account in sequence
-ccm switch-to <target>         # Switch to account by number, email, or alias
+ccm switch <target>         # Switch to account by number, email, or alias
 ccm undo                       # Revert to the previous account
 ccm list                       # List all managed accounts with metadata
 ccm status                     # Show detailed status of the active account
@@ -148,7 +147,7 @@ ccm help usage                         # Show usage module help
 ./ccm.sh alias 2 personal
 
 # Switch by alias
-./ccm.sh switch-to work
+./ccm.sh switch work
 
 # View history
 ./ccm.sh history
@@ -209,7 +208,7 @@ When switching accounts, CCM:
 2. Restores the target account's authentication data
 3. Updates Claude Code's authentication files
 
-Sessions are stored in `~/.claude/projects/`. Environment snapshots are saved to `~/.claude-switch-backup/env-snapshots/`.
+Sessions are stored in `~/.claude/projects/`. Environment snapshots are saved to `~/.claude-switch-backup/snapshots/`.
 
 ## Troubleshooting
 
