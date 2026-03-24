@@ -1,6 +1,17 @@
+```
+ ██████╗ ██████╗███╗   ███╗
+██╔════╝██╔════╝████╗ ████║
+██║     ██║     ██╔████╔██║
+██║     ██║     ██║╚██╔╝██║
+╚██████╗╚██████╗██║ ╚═╝ ██║
+ ╚═════╝ ╚═════╝╚═╝     ╚═╝
+```
+
 # CCM -- Claude Code Manager
 
-A comprehensive CLI tool for managing Claude Code accounts, sessions, environments, and usage on macOS, Linux, and WSL.
+> The power-user toolkit for Claude Code
+
+Manage accounts, sessions, environments, and usage — all from the terminal. Works on macOS, Linux, and WSL.
 
 ## Features
 
