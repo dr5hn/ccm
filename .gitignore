@@ -1,0 +1,16 @@
+
+# Claude Code local configuration files
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+.temp/
+.superpowers/
+.superpowers/
