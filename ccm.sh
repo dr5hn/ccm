@@ -2025,40 +2025,52 @@ session_relocate() {
     complete_progress
 
     # Step 2: Update cwd references in all session .jsonl files
-    show_progress "Updating path references in session files"
     local files_updated=0
-    local escaped_old escaped_new
-    # Escape for sed (handle forward slashes and special chars)
-    escaped_old=$(printf '%s\n' "$old_path" | sed 's/[&/\]/\\&/g')
-    escaped_new=$(printf '%s\n' "$new_path" | sed 's/[&/\]/\\&/g')
+    local temp_file
+    local file_index=0
 
-    while IFS= read -r -d '' session_file; do
-        if grep -q "$old_path" "$session_file" 2>/dev/null; then
-            # Use a temp file to avoid in-place sed portability issues
-            local temp_file
-            temp_file=$(mktemp)
-            sed "s|$old_path|$new_path|g" "$session_file" > "$temp_file"
-            mv "$temp_file" "$session_file"
-            ((files_updated++))
-        fi
+    # Collect session files into an array first (avoids subshell issues)
+    local session_files=()
+    while IFS= read -r -d '' f; do
+        session_files+=("$f")
     done < <(find "$new_session_dir" -name "*.jsonl" -type f -print0 2>/dev/null)
-    complete_progress
+
+    local total_files=${#session_files[@]}
+    if [[ $total_files -gt 0 ]]; then
+        log_info "Updating path references in $total_files session file(s)..."
+        for session_file in "${session_files[@]}"; do
+            ((file_index++))
+            printf "\r  [%d/%d] %s" "$file_index" "$total_files" "$(basename "$session_file")"
+            if grep -qF "$old_path" "$session_file" 2>/dev/null; then
+                temp_file=$(mktemp)
+                sed "s|$old_path|$new_path|g" "$session_file" > "$temp_file"
+                mv "$temp_file" "$session_file"
+                ((files_updated++))
+            fi
+        done
+        printf "\n"
+    fi
 
     # Step 3: Update memory files if they contain path references
-    show_progress "Updating memory files"
     local memory_updated=0
     if [[ -d "$new_session_dir/memory" ]]; then
-        while IFS= read -r -d '' mem_file; do
-            if grep -q "$old_path" "$mem_file" 2>/dev/null; then
-                local temp_file
-                temp_file=$(mktemp)
-                sed "s|$old_path|$new_path|g" "$mem_file" > "$temp_file"
-                mv "$temp_file" "$mem_file"
-                ((memory_updated++))
-            fi
+        local mem_files=()
+        while IFS= read -r -d '' f; do
+            mem_files+=("$f")
         done < <(find "$new_session_dir/memory" -type f -print0 2>/dev/null)
+
+        if [[ ${#mem_files[@]} -gt 0 ]]; then
+            log_info "Updating ${#mem_files[@]} memory file(s)..."
+            for mem_file in "${mem_files[@]}"; do
+                if grep -qF "$old_path" "$mem_file" 2>/dev/null; then
+                    temp_file=$(mktemp)
+                    sed "s|$old_path|$new_path|g" "$mem_file" > "$temp_file"
+                    mv "$temp_file" "$mem_file"
+                    ((memory_updated++))
+                fi
+            done
+        fi
     fi
-    complete_progress
 
     echo ""
     log_success "Relocation complete!"
