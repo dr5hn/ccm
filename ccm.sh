@@ -2164,6 +2164,11 @@ cmd_interactive() {
         echo "  el) Env snapshots list"
         echo "  ea) Env audit"
         echo ""
+        echo -e "${COLOR_BOLD}Maintenance:${COLOR_RESET}"
+        echo "  dr) Doctor (health check)"
+        echo "  cl) Clean all (dry run)"
+        echo "  op) Optimize tokens"
+        echo ""
         echo "  q) Quit"
         echo ""
         echo -n "Select an option (1-$((idx-1)) or action): "
@@ -2260,6 +2265,24 @@ cmd_interactive() {
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
+            dr|DR)
+                echo ""
+                doctor_scan 0
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            cl|CL)
+                echo ""
+                clean_all --dry-run
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
+            op|OP)
+                echo ""
+                cmd_optimize
+                echo ""
+                read -p "Press Enter to continue..."
+                ;;
             q|Q)
                 echo ""
                 log_info "Goodbye!"
@@ -2290,6 +2313,63 @@ show_help() {
     local topic="${1:-}"
 
     case "$topic" in
+        doctor)
+            echo -e "${COLOR_BOLD}ccm doctor — Health Diagnostics${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm doctor [--fix]"
+            echo ""
+            echo "Scans ~/.claude/ for health issues including stale lock files,"
+            echo "debug log bloat, plugin cache size, telemetry accumulation,"
+            echo "todo accumulation, paste cache, file history, shell snapshots,"
+            echo "and orphaned sessions."
+            echo ""
+            echo -e "${COLOR_BOLD}Options:${COLOR_RESET}"
+            echo "  --fix     Auto-fix safe issues (remove old logs, stale locks, etc.)"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm doctor             # Report issues only"
+            echo "  ccm doctor --fix       # Fix safe issues automatically"
+            ;;
+        clean)
+            echo -e "${COLOR_BOLD}ccm clean — Targeted Cleanup${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm clean <target> [options]"
+            echo ""
+            echo -e "${COLOR_BOLD}Targets:${COLOR_RESET}"
+            echo "  cache                    Clean plugin cache (interactive)"
+            echo "  debug [--days N]         Remove debug logs older than N days (default: 30)"
+            echo "  telemetry                Remove all telemetry files"
+            echo "  todos [--days N]         Remove todo files older than N days (default: 30)"
+            echo "  history [--keep N]       Trim history.jsonl to last N entries (default: 1000)"
+            echo "  all [--dry-run]          Run all clean targets"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm clean debug --days 7"
+            echo "  ccm clean telemetry"
+            echo "  ccm clean history --keep 500"
+            echo "  ccm clean all --dry-run"
+            echo "  ccm clean all"
+            ;;
+        optimize)
+            echo -e "${COLOR_BOLD}ccm optimize — Token Usage Analysis${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm optimize"
+            echo ""
+            echo "Analyzes token consumption footprint and provides actionable"
+            echo "recommendations to reduce per-request overhead."
+            echo ""
+            echo -e "${COLOR_BOLD}Checks:${COLOR_RESET}"
+            echo "  Global CLAUDE.md         Warns if > 4000 chars (~1000 tokens)"
+            echo "  Project CLAUDE.md        Warns if > 4000 chars (~1000 tokens)"
+            echo "  MEMORY.md                Warns if > 200 lines (only first 200 loaded)"
+            echo "  Plugins                  Warns if > 15 plugins (~500 tokens each)"
+            echo "  MCP servers              Flags servers with CLI alternatives"
+            echo "  Hooks                    Warns if hook prompts exceed 2000 chars"
+            echo "  Permissions              Warns if allowlist entries > 50"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm optimize"
+            ;;
         session)
             echo -e "${COLOR_BOLD}ccm session — Session Management${COLOR_RESET}"
             echo ""
@@ -2376,6 +2456,11 @@ show_help() {
             echo "  session <subcommand>               Manage Claude Code sessions"
             echo "  env <subcommand>                   Environment snapshots & audit"
             echo "  usage <subcommand>                 Usage statistics & reporting"
+            echo ""
+            echo -e "${COLOR_BOLD}Maintenance:${COLOR_RESET}"
+            echo "  doctor [--fix]                         Diagnose and fix Claude Code health issues"
+            echo "  clean <target> [--dry-run]             Clean up cache, logs, telemetry, todos, history"
+            echo "  optimize                               Analyze and optimize token usage"
             echo ""
             echo -e "${COLOR_BOLD}Other:${COLOR_RESET}"
             echo "  interactive                        Launch interactive menu mode"
@@ -2965,6 +3050,882 @@ usage_top() {
     echo ""
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Doctor Module — Health Diagnostics
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Routes doctor subcommands to their implementations
+# Parameters: $@ — optional flags (--fix)
+# Returns: Exit code from dispatched scan
+# Usage: cmd_doctor | cmd_doctor --fix
+cmd_doctor() {
+    local fix_mode=0
+    if [[ "${1:-}" == "--fix" ]]; then
+        fix_mode=1
+    fi
+    doctor_scan "$fix_mode"
+}
+
+# Purpose: Calculates total size of a directory in bytes (cross-platform)
+# Parameters: $1 — directory path
+# Returns: Prints size in bytes
+# Usage: size=$(doctor_dir_size "/path/to/dir")
+doctor_dir_size() {
+    local dir="$1"
+    if [[ ! -d "$dir" ]]; then
+        echo "0"
+        return
+    fi
+    local platform
+    platform=$(detect_platform)
+    case "$platform" in
+        macos)  du -sk "$dir" 2>/dev/null | awk '{print $1 * 1024}' ;;
+        *)      du -sb "$dir" 2>/dev/null | awk '{print $1}' ;;
+    esac
+}
+
+# Purpose: Counts files older than N days in a directory
+# Parameters: $1 — directory path, $2 — age in days
+# Returns: Prints count of old files
+# Usage: count=$(doctor_count_old_files "/path" 30)
+doctor_count_old_files() {
+    local dir="$1"
+    local days="$2"
+    if [[ ! -d "$dir" ]]; then
+        echo "0"
+        return
+    fi
+    find "$dir" -type f -mtime +"$days" 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Purpose: Counts all files in a directory
+# Parameters: $1 — directory path
+# Returns: Prints file count
+# Usage: count=$(doctor_count_files "/path")
+doctor_count_files() {
+    local dir="$1"
+    if [[ ! -d "$dir" ]]; then
+        echo "0"
+        return
+    fi
+    find "$dir" -type f 2>/dev/null | wc -l | tr -d ' '
+}
+
+# Purpose: Removes files older than N days from a directory
+# Parameters: $1 — directory path, $2 — age in days
+# Returns: Prints count of removed files
+# Usage: removed=$(doctor_remove_old_files "/path" 30)
+doctor_remove_old_files() {
+    local dir="$1"
+    local days="$2"
+    if [[ ! -d "$dir" ]]; then
+        echo "0"
+        return
+    fi
+    local count
+    count=$(find "$dir" -type f -mtime +"$days" 2>/dev/null | wc -l | tr -d ' ')
+    find "$dir" -type f -mtime +"$days" -delete 2>/dev/null
+    echo "$count"
+}
+
+# Purpose: Scans ~/.claude/ for health issues and optionally fixes them
+# Parameters: $1 — fix mode (1=fix, 0=report only)
+# Returns: 0 on success
+# Usage: doctor_scan 0 (report) | doctor_scan 1 (fix)
+doctor_scan() {
+    local fix_mode="${1:-0}"
+    local issues=0
+    local recoverable_bytes=0
+    local now
+    now=$(date +%s)
+    local day_seconds=86400
+
+    echo -e "${COLOR_BOLD}CCM Doctor — Health Check${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}"
+    echo ""
+
+    # 1. Stale lock files
+    local stale_locks=0
+    local lock_dirs=("$HOME/.claude/ide" "$HOME/.claude/sessions")
+    for lock_base in "${lock_dirs[@]}"; do
+        if [[ -d "$lock_base" ]]; then
+            while IFS= read -r lockfile; do
+                local mtime
+                mtime=$(get_mtime "$lockfile")
+                if [[ $((now - mtime)) -gt $((24 * day_seconds)) ]]; then
+                    stale_locks=$((stale_locks + 1))
+                    if [[ "$fix_mode" -eq 1 ]]; then
+                        rm -f "$lockfile"
+                    fi
+                fi
+            done < <(find "$lock_base" -name "*.lock" -o -name "lock" 2>/dev/null)
+        fi
+    done
+    if [[ "$stale_locks" -eq 0 ]]; then
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Lock files" "No stale locks found"
+    else
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Lock files" "$stale_locks stale lock(s) older than 24 hours"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]]; then
+            log_step "  Removed $stale_locks stale lock file(s)"
+        fi
+    fi
+
+    # 2. Debug log bloat
+    local debug_dir="$HOME/.claude/debug"
+    local debug_size
+    debug_size=$(doctor_dir_size "$debug_dir")
+    local debug_count
+    debug_count=$(doctor_count_files "$debug_dir")
+    local debug_old
+    debug_old=$(doctor_count_old_files "$debug_dir" 30)
+    local debug_size_mb=$((debug_size / 1048576))
+    if [[ "$debug_size_mb" -gt 50 ]] || [[ "$debug_old" -gt 0 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Debug logs" "$(format_size "$debug_size") ($debug_count files, $debug_old older than 30 days)"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ "$debug_old" -gt 0 ]]; then
+            local old_size_before=$debug_size
+            local removed
+            removed=$(doctor_remove_old_files "$debug_dir" 30)
+            local new_size
+            new_size=$(doctor_dir_size "$debug_dir")
+            local freed=$((old_size_before - new_size))
+            recoverable_bytes=$((recoverable_bytes + freed))
+            log_step "  Removed $removed old debug log(s), freed $(format_size "$freed")"
+        elif [[ "$debug_old" -gt 0 ]]; then
+            recoverable_bytes=$((recoverable_bytes + debug_size))
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Debug logs" "$(format_size "$debug_size") ($debug_count files)"
+    fi
+
+    # 3. Plugin cache bloat
+    local plugin_cache_dir="$HOME/.claude/plugins/cache"
+    local plugin_size
+    plugin_size=$(doctor_dir_size "$plugin_cache_dir")
+    local plugin_size_mb=$((plugin_size / 1048576))
+    if [[ "$plugin_size_mb" -gt 200 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Plugin cache" "$(format_size "$plugin_size") (consider manual cleanup)"
+        issues=$((issues + 1))
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Plugin cache" "$(format_size "$plugin_size")"
+    fi
+
+    # 4. Telemetry accumulation
+    local telemetry_dir="$HOME/.claude/telemetry"
+    local telemetry_size
+    telemetry_size=$(doctor_dir_size "$telemetry_dir")
+    local telemetry_count
+    telemetry_count=$(doctor_count_files "$telemetry_dir")
+    local telemetry_size_mb=$((telemetry_size / 1048576))
+    if [[ "$telemetry_size_mb" -gt 20 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Telemetry" "$(format_size "$telemetry_size") ($telemetry_count files)"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ -d "$telemetry_dir" ]]; then
+            find "$telemetry_dir" -type f -delete 2>/dev/null
+            recoverable_bytes=$((recoverable_bytes + telemetry_size))
+            log_step "  Removed $telemetry_count telemetry file(s), freed $(format_size "$telemetry_size")"
+        else
+            recoverable_bytes=$((recoverable_bytes + telemetry_size))
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Telemetry" "$(format_size "$telemetry_size") ($telemetry_count files)"
+    fi
+
+    # 5. Todo accumulation
+    local todo_dir="$HOME/.claude/todos"
+    local todo_count
+    todo_count=$(doctor_count_files "$todo_dir")
+    local todo_old
+    todo_old=$(doctor_count_old_files "$todo_dir" 30)
+    if [[ "$todo_count" -gt 100 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Todos" "$todo_count files ($todo_old older than 30 days)"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ "$todo_old" -gt 0 ]]; then
+            local removed
+            removed=$(doctor_remove_old_files "$todo_dir" 30)
+            log_step "  Removed $removed old todo file(s)"
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Todos" "$todo_count files"
+    fi
+
+    # 6. Paste cache
+    local paste_dir="$HOME/.claude/paste-cache"
+    local paste_size
+    paste_size=$(doctor_dir_size "$paste_dir")
+    local paste_size_mb=$((paste_size / 1048576))
+    if [[ "$paste_size_mb" -gt 10 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Paste cache" "$(format_size "$paste_size")"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ -d "$paste_dir" ]]; then
+            find "$paste_dir" -type f -delete 2>/dev/null
+            recoverable_bytes=$((recoverable_bytes + paste_size))
+            log_step "  Cleared paste cache, freed $(format_size "$paste_size")"
+        else
+            recoverable_bytes=$((recoverable_bytes + paste_size))
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Paste cache" "$(format_size "$paste_size")"
+    fi
+
+    # 7. File history
+    local history_dir="$HOME/.claude/file-history"
+    local history_size
+    history_size=$(doctor_dir_size "$history_dir")
+    local history_old
+    history_old=$(doctor_count_old_files "$history_dir" 30)
+    local history_size_mb=$((history_size / 1048576))
+    if [[ "$history_size_mb" -gt 50 ]] || [[ "$history_old" -gt 0 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "File history" "$(format_size "$history_size") ($history_old entries older than 30 days)"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ "$history_old" -gt 0 ]]; then
+            local old_size_before=$history_size
+            local removed
+            removed=$(doctor_remove_old_files "$history_dir" 30)
+            local new_size
+            new_size=$(doctor_dir_size "$history_dir")
+            local freed=$((old_size_before - new_size))
+            recoverable_bytes=$((recoverable_bytes + freed))
+            log_step "  Removed $removed old file history entries, freed $(format_size "$freed")"
+        elif [[ "$history_old" -gt 0 ]]; then
+            recoverable_bytes=$((recoverable_bytes + history_size))
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "File history" "$(format_size "$history_size")"
+    fi
+
+    # 8. Shell snapshots
+    local snapshot_dir="$HOME/.claude/shell-snapshots"
+    local snapshot_count
+    snapshot_count=$(doctor_count_files "$snapshot_dir")
+    if [[ "$snapshot_count" -gt 100 ]]; then
+        local snapshot_old
+        snapshot_old=$(doctor_count_old_files "$snapshot_dir" 30)
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Shell snapshots" "$snapshot_count files ($snapshot_old older than 30 days)"
+        issues=$((issues + 1))
+        if [[ "$fix_mode" -eq 1 ]] && [[ -d "$snapshot_dir" ]]; then
+            # Keep the 50 most recent, remove the rest
+            local to_remove
+            to_remove=$(find "$snapshot_dir" -type f 2>/dev/null | xargs ls -t 2>/dev/null | tail -n +51)
+            local removed=0
+            while IFS= read -r f; do
+                [[ -n "$f" ]] || continue
+                rm -f "$f"
+                removed=$((removed + 1))
+            done <<< "$to_remove"
+            log_step "  Removed $removed old shell snapshots, kept 50 most recent"
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Shell snapshots" "$snapshot_count files"
+    fi
+
+    # 9. Orphaned sessions
+    local orphan_count=0
+    local orphan_bytes=0
+    if [[ -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        for session_dir in "$CLAUDE_PROJECTS_DIR"/*/; do
+            [[ -d "$session_dir" ]] || continue
+            local dirname
+            dirname=$(basename "$session_dir")
+            local decoded_path
+            decoded_path=$(decode_project_path "$dirname")
+            if [[ ! -d "$decoded_path" ]]; then
+                orphan_count=$((orphan_count + 1))
+                local disk_bytes
+                disk_bytes=$(doctor_dir_size "$session_dir")
+                orphan_bytes=$((orphan_bytes + disk_bytes))
+            fi
+        done
+    fi
+    if [[ "$orphan_count" -gt 0 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Orphaned sessions" "$orphan_count orphaned ($(format_size "$orphan_bytes"))"
+        issues=$((issues + 1))
+        recoverable_bytes=$((recoverable_bytes + orphan_bytes))
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Orphaned sessions" "No orphaned sessions found"
+    fi
+
+    # Summary
+    echo ""
+    if [[ "$issues" -eq 0 ]]; then
+        log_success "No issues found. Claude Code environment is healthy."
+    elif [[ "$fix_mode" -eq 1 ]]; then
+        log_success "Fixed $issues issue(s), freed $(format_size "$recoverable_bytes")"
+    else
+        echo -e "${COLOR_BOLD}Summary:${COLOR_RESET} $issues issue(s) found, ~$(format_size "$recoverable_bytes") recoverable"
+        echo "Run 'ccm doctor --fix' to auto-fix safe issues."
+    fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Clean Module — Targeted Cleanup
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Routes clean subcommands to their implementations
+# Parameters: $1 — target (cache|debug|telemetry|todos|history|all), remaining args forwarded
+# Returns: Exit code from dispatched subcommand
+# Usage: cmd_clean debug --days 30 | cmd_clean all --dry-run
+cmd_clean() {
+    case "${1:-}" in
+        cache)      shift; clean_cache "$@" ;;
+        debug)      shift; clean_debug "$@" ;;
+        telemetry)  clean_telemetry ;;
+        todos)      shift; clean_todos "$@" ;;
+        history)    shift; clean_history "$@" ;;
+        all)        shift; clean_all "$@" ;;
+        "")         show_help clean ;;
+        *)          log_error "Unknown clean target '$1'"; show_help clean; exit 1 ;;
+    esac
+}
+
+# Purpose: Cleans plugin cache by listing cached directories and their sizes
+# Parameters: None
+# Returns: 0 on success
+# Usage: clean_cache
+clean_cache() {
+    local cache_dir="$HOME/.claude/plugins/cache"
+    if [[ ! -d "$cache_dir" ]]; then
+        log_info "Plugin cache directory not found. Nothing to clean."
+        return 0
+    fi
+
+    local total_size
+    total_size=$(doctor_dir_size "$cache_dir")
+    echo -e "${COLOR_BOLD}Plugin Cache${COLOR_RESET}"
+    echo ""
+    echo "Total size: $(format_size "$total_size")"
+    echo ""
+
+    local found_dirs=0
+    for plugin_dir in "$cache_dir"/*/; do
+        [[ -d "$plugin_dir" ]] || continue
+        found_dirs=1
+        local name
+        name=$(basename "$plugin_dir")
+        local size
+        size=$(doctor_dir_size "$plugin_dir")
+        printf "  %-40s %s\n" "$name" "$(format_size "$size")"
+    done
+
+    if [[ "$found_dirs" -eq 0 ]]; then
+        log_info "No cached plugins found."
+        return 0
+    fi
+
+    echo ""
+    echo -n "Remove all cached plugins? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    find "$cache_dir" -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + 2>/dev/null
+    log_success "Plugin cache cleared, freed $(format_size "$total_size")"
+}
+
+# Purpose: Removes debug logs older than N days
+# Parameters: --days N (default 30)
+# Returns: 0 on success
+# Usage: clean_debug | clean_debug --days 7
+clean_debug() {
+    local days=30
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days) days="$2"; shift 2 ;;
+            *)      log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    local debug_dir="$HOME/.claude/debug"
+    if [[ ! -d "$debug_dir" ]]; then
+        log_info "Debug log directory not found. Nothing to clean."
+        return 0
+    fi
+
+    local old_count
+    old_count=$(doctor_count_old_files "$debug_dir" "$days")
+    local total_size
+    total_size=$(doctor_dir_size "$debug_dir")
+
+    echo -e "${COLOR_BOLD}Debug Log Cleanup${COLOR_RESET}"
+    echo ""
+    echo "Total debug log size: $(format_size "$total_size")"
+    echo "Files older than $days days: $old_count"
+
+    if [[ "$old_count" -eq 0 ]]; then
+        echo ""
+        log_success "No debug logs older than $days days."
+        return 0
+    fi
+
+    echo ""
+    echo -n "Remove $old_count debug log(s) older than $days days? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    local size_before=$total_size
+    local removed
+    removed=$(doctor_remove_old_files "$debug_dir" "$days")
+    local size_after
+    size_after=$(doctor_dir_size "$debug_dir")
+    local freed=$((size_before - size_after))
+    log_success "Removed $removed debug log(s), freed $(format_size "$freed")"
+}
+
+# Purpose: Removes all telemetry files
+# Parameters: None
+# Returns: 0 on success
+# Usage: clean_telemetry
+clean_telemetry() {
+    local telemetry_dir="$HOME/.claude/telemetry"
+    if [[ ! -d "$telemetry_dir" ]]; then
+        log_info "Telemetry directory not found. Nothing to clean."
+        return 0
+    fi
+
+    local count
+    count=$(doctor_count_files "$telemetry_dir")
+    local total_size
+    total_size=$(doctor_dir_size "$telemetry_dir")
+
+    echo -e "${COLOR_BOLD}Telemetry Cleanup${COLOR_RESET}"
+    echo ""
+    echo "Telemetry files: $count"
+    echo "Total size: $(format_size "$total_size")"
+
+    if [[ "$count" -eq 0 ]]; then
+        echo ""
+        log_success "No telemetry files found."
+        return 0
+    fi
+
+    echo ""
+    echo -n "Remove all $count telemetry file(s)? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    find "$telemetry_dir" -type f -delete 2>/dev/null
+    log_success "Removed $count telemetry file(s), freed $(format_size "$total_size")"
+}
+
+# Purpose: Removes todo files older than N days
+# Parameters: --days N (default 30)
+# Returns: 0 on success
+# Usage: clean_todos | clean_todos --days 7
+clean_todos() {
+    local days=30
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days) days="$2"; shift 2 ;;
+            *)      log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    local todo_dir="$HOME/.claude/todos"
+    if [[ ! -d "$todo_dir" ]]; then
+        log_info "Todos directory not found. Nothing to clean."
+        return 0
+    fi
+
+    local total_count
+    total_count=$(doctor_count_files "$todo_dir")
+    local old_count
+    old_count=$(doctor_count_old_files "$todo_dir" "$days")
+
+    echo -e "${COLOR_BOLD}Todos Cleanup${COLOR_RESET}"
+    echo ""
+    echo "Total todo files: $total_count"
+    echo "Files older than $days days: $old_count"
+
+    if [[ "$old_count" -eq 0 ]]; then
+        echo ""
+        log_success "No todo files older than $days days."
+        return 0
+    fi
+
+    echo ""
+    echo -n "Remove $old_count todo file(s) older than $days days? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    local removed
+    removed=$(doctor_remove_old_files "$todo_dir" "$days")
+    log_success "Removed $removed old todo file(s)"
+}
+
+# Purpose: Trims history.jsonl to keep last N entries
+# Parameters: --keep N (default 1000)
+# Returns: 0 on success
+# Usage: clean_history | clean_history --keep 500
+clean_history() {
+    local keep=1000
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --keep) keep="$2"; shift 2 ;;
+            *)      log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    local history_file="$HOME/.claude/history.jsonl"
+    if [[ ! -f "$history_file" ]]; then
+        log_info "History file not found. Nothing to clean."
+        return 0
+    fi
+
+    local total_lines
+    total_lines=$(wc -l < "$history_file" | tr -d ' ')
+
+    echo -e "${COLOR_BOLD}History Cleanup${COLOR_RESET}"
+    echo ""
+    echo "Total history entries: $total_lines"
+    echo "Entries to keep: $keep"
+
+    if [[ "$total_lines" -le "$keep" ]]; then
+        echo ""
+        log_success "History has $total_lines entries, within limit of $keep."
+        return 0
+    fi
+
+    local to_remove=$((total_lines - keep))
+    echo "Entries to remove: $to_remove"
+
+    echo ""
+    echo -n "Remove $to_remove oldest history entries? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    local temp_file
+    temp_file=$(mktemp "${history_file}.XXXXXX")
+    tail -n "$keep" "$history_file" > "$temp_file"
+    mv "$temp_file" "$history_file"
+    log_success "Removed $to_remove history entries, kept last $keep"
+}
+
+# Purpose: Runs all clean targets with optional dry-run mode
+# Parameters: --dry-run (optional)
+# Returns: 0 on success
+# Usage: clean_all | clean_all --dry-run
+clean_all() {
+    local dry_run=0
+    if [[ "${1:-}" == "--dry-run" ]]; then
+        dry_run=1
+    fi
+
+    echo -e "${COLOR_BOLD}CCM Clean All${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━${COLOR_RESET}"
+    echo ""
+
+    local total_freed=0
+
+    # Debug logs (30 days)
+    local debug_dir="$HOME/.claude/debug"
+    local debug_old
+    debug_old=$(doctor_count_old_files "$debug_dir" 30)
+    local debug_size
+    debug_size=$(doctor_dir_size "$debug_dir")
+    if [[ "$debug_old" -gt 0 ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Debug logs: $debug_old files older than 30 days ($(format_size "$debug_size") total)"
+        if [[ "$dry_run" -eq 0 ]]; then
+            local size_before=$debug_size
+            doctor_remove_old_files "$debug_dir" 30 >/dev/null
+            local size_after
+            size_after=$(doctor_dir_size "$debug_dir")
+            local freed=$((size_before - size_after))
+            total_freed=$((total_freed + freed))
+            log_step "  Removed $debug_old old debug log(s), freed $(format_size "$freed")"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Debug logs: clean"
+    fi
+
+    # Telemetry
+    local telemetry_dir="$HOME/.claude/telemetry"
+    local telemetry_count
+    telemetry_count=$(doctor_count_files "$telemetry_dir")
+    local telemetry_size
+    telemetry_size=$(doctor_dir_size "$telemetry_dir")
+    if [[ "$telemetry_count" -gt 0 ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Telemetry: $telemetry_count files ($(format_size "$telemetry_size"))"
+        if [[ "$dry_run" -eq 0 ]]; then
+            find "$telemetry_dir" -type f -delete 2>/dev/null
+            total_freed=$((total_freed + telemetry_size))
+            log_step "  Removed $telemetry_count telemetry file(s), freed $(format_size "$telemetry_size")"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Telemetry: clean"
+    fi
+
+    # Todos (30 days)
+    local todo_dir="$HOME/.claude/todos"
+    local todo_old
+    todo_old=$(doctor_count_old_files "$todo_dir" 30)
+    if [[ "$todo_old" -gt 0 ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Todos: $todo_old files older than 30 days"
+        if [[ "$dry_run" -eq 0 ]]; then
+            doctor_remove_old_files "$todo_dir" 30 >/dev/null
+            log_step "  Removed $todo_old old todo file(s)"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Todos: clean"
+    fi
+
+    # Paste cache
+    local paste_dir="$HOME/.claude/paste-cache"
+    local paste_size
+    paste_size=$(doctor_dir_size "$paste_dir")
+    local paste_count
+    paste_count=$(doctor_count_files "$paste_dir")
+    if [[ "$paste_count" -gt 0 ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Paste cache: $(format_size "$paste_size")"
+        if [[ "$dry_run" -eq 0 ]]; then
+            find "$paste_dir" -type f -delete 2>/dev/null
+            total_freed=$((total_freed + paste_size))
+            log_step "  Cleared paste cache, freed $(format_size "$paste_size")"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Paste cache: clean"
+    fi
+
+    # History
+    local history_file="$HOME/.claude/history.jsonl"
+    if [[ -f "$history_file" ]]; then
+        local history_lines
+        history_lines=$(wc -l < "$history_file" | tr -d ' ')
+        if [[ "$history_lines" -gt 1000 ]]; then
+            local to_remove=$((history_lines - 1000))
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} History: $history_lines entries ($to_remove over limit of 1000)"
+            if [[ "$dry_run" -eq 0 ]]; then
+                local temp_file
+                temp_file=$(mktemp "${history_file}.XXXXXX")
+                tail -n 1000 "$history_file" > "$temp_file"
+                mv "$temp_file" "$history_file"
+                log_step "  Trimmed history to 1000 entries (removed $to_remove)"
+            fi
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} History: $history_lines entries (within limit)"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} History: no file found"
+    fi
+
+    echo ""
+    if [[ "$dry_run" -eq 1 ]]; then
+        log_info "Dry run — no changes made. Remove --dry-run to execute cleanup."
+    else
+        log_success "Cleanup complete, freed $(format_size "$total_freed")"
+    fi
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Optimize Module — Token Usage Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Analyzes token consumption footprint and provides optimization recommendations
+# Parameters: None
+# Returns: 0 on success
+# Usage: cmd_optimize
+cmd_optimize() {
+    echo -e "${COLOR_BOLD}CCM Optimize — Token Usage Analysis${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}"
+    echo ""
+    echo -e "${COLOR_BOLD}Context Window Footprint:${COLOR_RESET}"
+    echo ""
+
+    local total_tokens=0
+    local recommendations=()
+    local potential_savings=0
+
+    # 1. Global CLAUDE.md
+    local global_claude="$HOME/.claude/CLAUDE.md"
+    local global_chars=0
+    local global_lines=0
+    local global_tokens=0
+    if [[ -f "$global_claude" ]]; then
+        global_chars=$(wc -c < "$global_claude" | tr -d ' ')
+        global_lines=$(wc -l < "$global_claude" | tr -d ' ')
+        global_tokens=$((global_chars / 4))
+    fi
+    total_tokens=$((total_tokens + global_tokens))
+    local global_fmt
+    global_fmt=$(printf "%'d" "$global_chars" 2>/dev/null || echo "$global_chars")
+    local global_tok_fmt
+    global_tok_fmt=$(printf "%'d" "$global_tokens" 2>/dev/null || echo "$global_tokens")
+    if [[ "$global_chars" -gt 4000 ]]; then
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Consider trimming${COLOR_RESET}\n" "Global CLAUDE.md" "$global_fmt" "$global_tok_fmt"
+        recommendations+=("Trim global CLAUDE.md — at $global_fmt chars it adds ~$global_tok_fmt tokens to every request")
+        potential_savings=$((potential_savings + global_tokens / 3))
+    else
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Global CLAUDE.md" "$global_fmt" "$global_tok_fmt"
+    fi
+
+    # 2. Project CLAUDE.md
+    local project_claude=".claude/CLAUDE.md"
+    local proj_chars=0
+    local proj_tokens=0
+    if [[ -f "$project_claude" ]]; then
+        proj_chars=$(wc -c < "$project_claude" | tr -d ' ')
+        proj_tokens=$((proj_chars / 4))
+    fi
+    total_tokens=$((total_tokens + proj_tokens))
+    local proj_fmt
+    proj_fmt=$(printf "%'d" "$proj_chars" 2>/dev/null || echo "$proj_chars")
+    local proj_tok_fmt
+    proj_tok_fmt=$(printf "%'d" "$proj_tokens" 2>/dev/null || echo "$proj_tokens")
+    if [[ "$proj_chars" -gt 4000 ]]; then
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Consider trimming${COLOR_RESET}\n" "Project CLAUDE.md" "$proj_fmt" "$proj_tok_fmt"
+        recommendations+=("Trim project CLAUDE.md — at $proj_fmt chars it adds ~$proj_tok_fmt tokens per request")
+        potential_savings=$((potential_savings + proj_tokens / 3))
+    else
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Project CLAUDE.md" "$proj_fmt" "$proj_tok_fmt"
+    fi
+
+    # Combined warning
+    if [[ "$global_chars" -gt 4000 ]] && [[ "$proj_chars" -gt 4000 ]]; then
+        local combined=$((global_tokens + proj_tokens))
+        recommendations+=("Both CLAUDE.md files are large (combined ~$combined tokens) — consider splitting shared rules into project-specific files")
+    fi
+
+    # 3. MEMORY.md
+    local cwd_encoded
+    cwd_encoded=$(pwd | sed 's|/|%2F|g')
+    local memory_file="$HOME/.claude/projects/$cwd_encoded/memory/MEMORY.md"
+    local memory_lines=0
+    if [[ -f "$memory_file" ]]; then
+        memory_lines=$(wc -l < "$memory_file" | tr -d ' ')
+    fi
+    if [[ "$memory_lines" -gt 200 ]]; then
+        printf "  %-24s %6d lines                        ${COLOR_YELLOW}${SYM_WARN} Only first 200 loaded${COLOR_RESET}\n" "MEMORY.md" "$memory_lines"
+        recommendations+=("Trim MEMORY.md to 200 lines — only the first 200 are loaded, $((memory_lines - 200)) lines are wasted")
+    else
+        printf "  %-24s %6d lines                        ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "MEMORY.md" "$memory_lines"
+    fi
+
+    # 4. Enabled plugins
+    local settings_file="$HOME/.claude/settings.json"
+    local plugin_count=0
+    local plugin_tokens=0
+    if [[ -f "$settings_file" ]]; then
+        plugin_count=$(jq '[(.enabledPlugins // []) | length, (.projects // {} | [.[].plugins // []] | flatten | length)] | add' "$settings_file" 2>/dev/null || echo "0")
+        plugin_tokens=$((plugin_count * 500))
+    fi
+    total_tokens=$((total_tokens + plugin_tokens))
+    local plugin_tok_fmt
+    plugin_tok_fmt=$(printf "%'d" "$plugin_tokens" 2>/dev/null || echo "$plugin_tokens")
+    if [[ "$plugin_count" -gt 15 ]]; then
+        printf "  %-24s                (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} High — disable unused${COLOR_RESET}\n" "Plugins ($plugin_count enabled)" "$plugin_tok_fmt"
+        recommendations+=("Disable unused plugins — $plugin_count plugins add ~$plugin_tok_fmt tokens of tool schemas")
+        potential_savings=$((potential_savings + plugin_tokens / 3))
+    else
+        printf "  %-24s                (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Plugins ($plugin_count enabled)" "$plugin_tok_fmt"
+    fi
+
+    # 5. MCP servers
+    local mcp_config="$HOME/.claude/.mcp.json"
+    local mcp_count=0
+    local mcp_tokens=0
+    local mcp_replaceable=0
+    if [[ -f "$mcp_config" ]]; then
+        mcp_count=$(jq '[.mcpServers // {} | keys | length] | add' "$mcp_config" 2>/dev/null || echo "0")
+        mcp_tokens=$((mcp_count * 1500))
+
+        # Check for CLI-replaceable servers
+        declare -A _MCP_KNOWN=( ["playwright"]=1 ["postgres"]=1 ["filesystem"]=1 ["git"]=1 ["sqlite"]=1 ["docker"]=1 ["redis"]=1 ["mysql"]=1 )
+        local servers
+        servers=$(jq -r '.mcpServers // {} | keys[]' "$mcp_config" 2>/dev/null || true)
+        while IFS= read -r server; do
+            [[ -n "$server" ]] || continue
+            for key in "${!_MCP_KNOWN[@]}"; do
+                if [[ "$server" == *"$key"* ]]; then
+                    mcp_replaceable=$((mcp_replaceable + 1))
+                    break
+                fi
+            done
+        done <<< "$servers"
+    fi
+    total_tokens=$((total_tokens + mcp_tokens))
+    local mcp_tok_fmt
+    mcp_tok_fmt=$(printf "%'d" "$mcp_tokens" 2>/dev/null || echo "$mcp_tokens")
+    local mcp_label="MCP servers ($mcp_count)"
+    if [[ "$mcp_replaceable" -gt 0 ]]; then
+        printf "  %-24s                (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} $mcp_replaceable have CLI alternatives${COLOR_RESET}\n" "$mcp_label" "$mcp_tok_fmt"
+        recommendations+=("Replace $mcp_replaceable MCP server(s) with CLI — run 'ccm env audit' for details")
+        potential_savings=$((potential_savings + mcp_replaceable * 1500))
+    else
+        printf "  %-24s                (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "$mcp_label" "$mcp_tok_fmt"
+    fi
+
+    # 6. Hooks
+    local hook_chars=0
+    local hook_count=0
+    if [[ -f "$settings_file" ]]; then
+        hook_count=$(jq '[.hooks // {} | to_entries[] | .value | length] | add // 0' "$settings_file" 2>/dev/null || echo "0")
+        hook_chars=$(jq '[.hooks // {} | to_entries[] | .value[] | .prompt // "" | length] | add // 0' "$settings_file" 2>/dev/null || echo "0")
+    fi
+    local hook_tokens=$((hook_chars / 4))
+    total_tokens=$((total_tokens + hook_tokens))
+    local hook_fmt
+    hook_fmt=$(printf "%'d" "$hook_chars" 2>/dev/null || echo "$hook_chars")
+    local hook_tok_fmt
+    hook_tok_fmt=$(printf "%'d" "$hook_tokens" 2>/dev/null || echo "$hook_tokens")
+    if [[ "$hook_chars" -gt 2000 ]]; then
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Large hook prompts${COLOR_RESET}\n" "Hooks ($hook_count defined)" "$hook_fmt" "$hook_tok_fmt"
+        recommendations+=("Simplify hook prompts — $hook_fmt chars of hook prompt text adds ~$hook_tok_fmt tokens")
+        potential_savings=$((potential_savings + hook_tokens / 3))
+    else
+        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Hooks ($hook_count defined)" "$hook_fmt" "$hook_tok_fmt"
+    fi
+
+    # 7. Settings.json permissions
+    local perm_count=0
+    if [[ -f "$settings_file" ]]; then
+        perm_count=$(jq '[(.permissions // {}) | to_entries[] | .value | if type == "array" then length else 0 end] | add // 0' "$settings_file" 2>/dev/null || echo "0")
+    fi
+    if [[ "$perm_count" -gt 50 ]]; then
+        printf "  %-24s %6d entries                     ${COLOR_YELLOW}${SYM_WARN} Large allowlist${COLOR_RESET}\n" "Permissions" "$perm_count"
+        recommendations+=("Reduce permission entries — $perm_count entries inflate context")
+    else
+        printf "  %-24s %6d entries                     ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Permissions" "$perm_count"
+    fi
+
+    # Estimated total
+    echo ""
+    local total_fmt
+    total_fmt=$(printf "%'d" "$total_tokens" 2>/dev/null || echo "$total_tokens")
+    echo -e "  ${COLOR_BOLD}Estimated total overhead: ~$total_fmt tokens per request${COLOR_RESET}"
+
+    # Recommendations
+    if [[ ${#recommendations[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${COLOR_BOLD}Recommendations:${COLOR_RESET}"
+        local idx=1
+        for rec in "${recommendations[@]}"; do
+            echo "  $idx. $rec"
+            idx=$((idx + 1))
+        done
+        echo ""
+        local savings_fmt
+        savings_fmt=$(printf "%'d" "$potential_savings" 2>/dev/null || echo "$potential_savings")
+        echo -e "${COLOR_BOLD}Potential savings: ~$savings_fmt tokens/request${COLOR_RESET}"
+    else
+        echo ""
+        log_success "Token usage looks well-optimized."
+    fi
+}
+
 # Main script logic
 # Purpose: Entry point — parses global flags, initializes colors, dispatches subcommands
 # Parameters: All CLI arguments
@@ -3005,6 +3966,9 @@ main() {
         session)        shift; cmd_session "$@" ;;
         env)            shift; cmd_env "$@" ;;
         usage)          shift; cmd_usage "$@" ;;
+        doctor)         shift; cmd_doctor "$@" ;;
+        clean)          shift; cmd_clean "$@" ;;
+        optimize)       cmd_optimize ;;
         help)           shift; show_help "$@" ;;
         version)        show_version ;;
         --help)         show_help ;;
