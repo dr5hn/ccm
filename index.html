@@ -532,6 +532,107 @@ body {
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+/* ══════════════ INSTALL ══════════════ */
+.install {
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.install-box {
+  max-width: 680px;
+  margin: 0 auto 12px;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+}
+
+.install-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.install-text .prompt { color: var(--text-muted); }
+
+.copy-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--accent-cyan);
+  background: rgba(56,189,248,0.08);
+  border: 1px solid rgba(56,189,248,0.2);
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.copy-btn:hover {
+  background: rgba(56,189,248,0.15);
+}
+
+.install-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.install-alt {
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.install-alt code {
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-secondary);
+}
+
+/* ══════════════ SOCIAL PROOF ══════════════ */
+.social-proof {
+  padding: 32px 24px;
+  text-align: center;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.proof-items {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.proof-divider {
+  color: rgba(255,255,255,0.1);
+}
+
+/* ══════════════ FOOTER ══════════════ */
+.footer {
+  padding: 40px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.footer a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.footer a:hover {
+  color: var(--accent-cyan);
+}
 </style>
 </head>
 <body>
@@ -673,11 +774,44 @@ body {
     </div>
   </div>
 </section>
-  <section class="install" id="install"></section>
-  <section class="social-proof" id="social-proof"></section>
+  <section class="install" id="install">
+  <div class="container">
+    <div class="section-label">Install</div>
+    <div class="install-box glass-card" onclick="copyInstallMain()">
+      <div class="install-text">
+        <span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash
+      </div>
+      <button class="copy-btn" id="mainCopyBtn">COPY</button>
+    </div>
+    <div class="install-note">Requires: bash 4.4+, jq · Works on macOS, Linux, WSL</div>
+    <div class="install-alt">Or clone manually: <code>git clone https://github.com/dr5hn/ccm.git &amp;&amp; cd ccm &amp;&amp; ./install.sh</code></div>
+  </div>
+</section>
+  <section class="social-proof" id="social-proof">
+  <div class="proof-items">
+    <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener"><img src="https://img.shields.io/github/stars/dr5hn/ccm?style=flat&amp;color=38bdf8&amp;labelColor=0d1117" alt="GitHub stars" height="20"></a>
+    <span class="proof-divider">·</span>
+    <span>MIT Licensed</span>
+    <span class="proof-divider">·</span>
+    <span>bash 4.4+</span>
+    <span class="proof-divider">·</span>
+    <span>Zero dependencies beyond jq</span>
+  </div>
+</section>
   <section class="commands" id="commands"></section>
-  <footer class="footer" id="footer"></footer>
+  <footer class="footer" id="footer">
+  MIT License · <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener">GitHub</a> · Made for Claude Code power users
+</footer>
 <script>
+function copyInstallMain() {
+  var text = 'curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash';
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = document.getElementById('mainCopyBtn');
+    btn.textContent = 'COPIED';
+    setTimeout(function() { btn.textContent = 'COPY'; }, 2000);
+  });
+}
+
 function copyInstall() {
   var text = 'curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash';
   navigator.clipboard.writeText(text).then(function() {
