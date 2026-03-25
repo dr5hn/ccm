@@ -340,6 +340,83 @@ body {
   font-size: 15px;
   color: var(--text-muted);
 }
+
+/* ══════════════ TERMINAL DEMO ══════════════ */
+.demo {
+  padding: 80px 24px;
+  position: relative;
+}
+
+.demo::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+}
+
+.demo .container { position: relative; z-index: 1; }
+
+.demo-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  justify-content: center;
+}
+
+.demo-tab {
+  padding: 8px 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.demo-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.03);
+}
+
+.demo-tab.active {
+  color: var(--accent-cyan);
+  background: rgba(56,189,248,0.08);
+  border-color: rgba(56,189,248,0.2);
+}
+
+.demo-terminal {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.demo-terminal .terminal-body {
+  min-height: 300px;
+}
+
+.term-line {
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.term-line.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.t-prompt { color: var(--text-muted); }
+.t-cmd { color: var(--text-primary); }
+.t-output { color: var(--text-secondary); }
+.t-success { color: var(--accent-green); }
+.t-muted { color: var(--text-muted); opacity: 0.7; }
+.t-warn { color: var(--accent-amber); }
+.t-active { color: var(--accent-green); }
 </style>
 </head>
 <body>
@@ -405,7 +482,26 @@ body {
       <p class="problem-transition">CCM fixes all of this with a single command.</p>
     </div>
   </section>
-  <section class="demo" id="demo"></section>
+  <section class="demo" id="demo">
+  <div class="container">
+    <div class="section-label" style="text-align:center">See It In Action</div>
+    <div class="demo-tabs">
+      <button class="demo-tab active" data-demo="accounts">accounts</button>
+      <button class="demo-tab" data-demo="sessions">sessions</button>
+      <button class="demo-tab" data-demo="env">env</button>
+      <button class="demo-tab" data-demo="usage">usage</button>
+    </div>
+    <div class="demo-terminal terminal-window">
+      <div class="terminal-titlebar">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <span class="terminal-title">ccm — zsh</span>
+      </div>
+      <div class="terminal-body" id="terminal"></div>
+    </div>
+  </div>
+</section>
   <section class="features" id="features"></section>
   <section class="how-it-works" id="how-it-works"></section>
   <section class="install" id="install"></section>
@@ -421,6 +517,189 @@ function copyInstall() {
     setTimeout(function() { btn.textContent = 'COPY'; }, 2000);
   });
 }
+
+var demos = {
+  accounts: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm list' },
+    { type: 'blank' },
+    { type: 'output', text: 'Managed Accounts:' },
+    { type: 'blank' },
+    { type: 'active', text: '  1  ★  darshan@personal.dev    [personal]    healthy' },
+    { type: 'output', text: '  2     darshan@company.com     [work]        healthy' },
+    { type: 'output', text: '  3     client@agency.io        [client]      healthy' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm switch work' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ Switched: personal → work (darshan@company.com)' },
+    { type: 'muted', text: '  Please restart Claude Code to use the new authentication.' }
+  ],
+  sessions: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm session list' },
+    { type: 'blank' },
+    { type: 'output', text: 'PROJECT                            FILES    SIZE  LAST ACTIVE     STATUS' },
+    { type: 'muted',  text: '────────────────────────────────────────────────────────────────────────' },
+    { type: 'active', text: '~/projects/my-saas-app                23  80 MB  just now         active' },
+    { type: 'output', text: '~/projects/api-gateway                11  32 MB  5 hours ago      active' },
+    { type: 'output', text: '~/experiments/test-project              2   1 MB  3 weeks ago      active' },
+    { type: 'warn',   text: '~/old/deleted-project                   5  18 MB  2 months ago  orphaned' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm session clean --dry-run' },
+    { type: 'blank' },
+    { type: 'warn', text: '⚠ Found 1 orphaned session (18 MB)' },
+    { type: 'muted', text: '  ~/old/deleted-project — project not found on disk' }
+  ],
+  env: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm env audit' },
+    { type: 'blank' },
+    { type: 'output', text: 'Token Efficiency Audit' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━' },
+    { type: 'blank' },
+    { type: 'warn',   text: '⚠ playwright (MCP) → CLI alternative available' },
+    { type: 'muted',  text: '  CLI: npx playwright test, npx playwright codegen' },
+    { type: 'muted',  text: '  Savings: ~2000 tokens/request' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ context7 (MCP) → Keep (no CLI equivalent)' },
+    { type: 'success', text: '✓ figma (MCP) → Keep (no CLI equivalent)' },
+    { type: 'blank' },
+    { type: 'output', text: '1 MCP replaceable, ~2000 tokens saved per request' }
+  ],
+  usage: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm usage summary' },
+    { type: 'blank' },
+    { type: 'output', text: 'Claude Code Usage Summary' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━━━━━━' },
+    { type: 'blank' },
+    { type: 'output', text: '  Projects:        55 (43 active, 12 orphaned)' },
+    { type: 'output', text: '  Sessions:       146 total (51 this week)' },
+    { type: 'output', text: '  Memory files:    21' },
+    { type: 'active', text: '  Disk usage:     452 MB' },
+    { type: 'output', text: '  Accounts:         3 managed' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm usage top --count 3' },
+    { type: 'blank' },
+    { type: 'output', text: '  1  ~/projects/my-saas-app         23  80 MB  just now' },
+    { type: 'output', text: '  2  ~/projects/csc-app              11  64 MB  7 hours ago' },
+    { type: 'output', text: '  3  ~/projects/teamwork-cli         11  32 MB  5 hours ago' }
+  ]
+};
+
+var currentDemo = 'accounts';
+var animating = false;
+
+function typeText(element, text, callback) {
+  var i = 0;
+  var interval = setInterval(function() {
+    element.textContent += text[i];
+    i++;
+    if (i >= text.length) {
+      clearInterval(interval);
+      if (callback) callback();
+    }
+  }, 30);
+}
+
+function renderDemo(name) {
+  if (animating) return;
+  currentDemo = name;
+  animating = true;
+
+  document.querySelectorAll('.demo-tab').forEach(function(t) { t.classList.remove('active'); });
+  document.querySelector('[data-demo="' + name + '"]').classList.add('active');
+
+  var terminal = document.getElementById('terminal');
+  terminal.textContent = '';
+
+  var lines = demos[name];
+  // Reset any _skip flags from previous renders
+  lines.forEach(function(l) { l._skip = false; });
+
+  var pendingLines = [];
+
+  lines.forEach(function(line, i) {
+    if (line._skip) return;
+
+    var div = document.createElement('div');
+    div.className = 'term-line';
+
+    if (line.type === 'blank') {
+      div.textContent = '\u00A0';
+    } else if (line.type === 'prompt') {
+      var promptSpan = document.createElement('span');
+      promptSpan.className = 't-prompt';
+      promptSpan.textContent = line.text;
+      div.appendChild(promptSpan);
+
+      // Merge with next cmd line — typing animation
+      if (lines[i + 1] && lines[i + 1].type === 'cmd') {
+        var cmdSpan = document.createElement('span');
+        cmdSpan.className = 't-cmd';
+        div.appendChild(cmdSpan);
+        lines[i + 1]._skip = true;
+
+        pendingLines.push({
+          div: div,
+          typing: true,
+          cmdSpan: cmdSpan,
+          cmdText: lines[i + 1].text
+        });
+        terminal.appendChild(div);
+        return;
+      }
+    } else {
+      var clsMap = {
+        output: 't-output', success: 't-success', muted: 't-muted',
+        warn: 't-warn', active: 't-active', cmd: 't-cmd'
+      };
+      var span = document.createElement('span');
+      span.className = clsMap[line.type] || 't-output';
+      span.textContent = line.text;
+      div.appendChild(span);
+    }
+
+    pendingLines.push({ div: div, typing: false });
+    terminal.appendChild(div);
+  });
+
+  // Animate lines sequentially
+  var lineIndex = 0;
+
+  function showNextLine() {
+    if (lineIndex >= pendingLines.length) {
+      animating = false;
+      return;
+    }
+
+    var item = pendingLines[lineIndex];
+    item.div.classList.add('visible');
+    lineIndex++;
+
+    if (item.typing) {
+      // Type the command text character by character
+      typeText(item.cmdSpan, item.cmdText, function() {
+        setTimeout(showNextLine, 100);
+      });
+    } else {
+      setTimeout(showNextLine, 50);
+    }
+  }
+
+  setTimeout(showNextLine, 200);
+}
+
+document.querySelectorAll('.demo-tab').forEach(function(tab) {
+  tab.addEventListener('click', function() { renderDemo(tab.dataset.demo); });
+});
+
+window.addEventListener('load', function() {
+  setTimeout(function() { renderDemo('accounts'); }, 600);
+});
 </script>
 </body>
 </html>
