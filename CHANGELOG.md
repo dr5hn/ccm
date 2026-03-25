@@ -2,6 +2,11 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [3.0.1] - 2026-03-25
+
+### Fixed
+- `ccm session relocate` no longer hangs on large projects — uses `grep -qF` (fixed-string) instead of regex, adds per-file progress output
+
 ## [3.0.0] - 2026-03-25
 
 ### Added

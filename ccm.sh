@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.0"
+readonly CCM_VERSION="3.0.1"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 readonly SCHEMA_VERSION="3.0"
@@ -2490,6 +2490,7 @@ show_help() {
             echo "  ccm export ~/accounts-backup.tar.gz"
             echo "  ccm history"
             echo "  ccm undo"
+            echo "  ccm session relocate ~/old/path ~/new/path"
             echo "  ccm help session"
             ;;
     esac
