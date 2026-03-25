@@ -7,7 +7,7 @@
  ╚═════╝ ╚═════╝╚═╝     ╚═╝
 ```
 
-# CCM -- Claude Code Manager
+# CCM — Claude Code Manager
 
 > The power-user toolkit for Claude Code
 
@@ -16,28 +16,37 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 ## Features
 
 ### Account Management
-- **Multi-account switching**: Add, remove, and switch between Claude Code accounts
-- **Account aliases**: Set friendly names like `work` or `personal` for quick access
-- **Switch history and undo**: Track switches and revert to the previous account instantly
-- **Health verification**: Validate backup integrity for all accounts
-- **Export/Import**: Backup and restore account configurations as portable archives
-- **Interactive mode**: Menu-driven interface for all operations
+- **Multi-account switching** — add, remove, and switch between Claude Code accounts
+- **Account aliases** — friendly names like `work` or `personal` for quick access
+- **Switch history and undo** — track switches and revert instantly
+- **Health verification** — validate backup integrity for all accounts
+- **Export/Import** — backup and restore account configurations as portable archives
+- **Interactive mode** — menu-driven interface for all operations
 
 ### Session Management
-- **Session listing**: View all Claude Code project sessions with size and age
-- **Session info**: Inspect sessions for a specific project directory
-- **Session relocation**: Move sessions when a project folder is relocated
-- **Session cleanup**: Remove orphaned sessions for projects that no longer exist on disk
+- **Session listing** — view all Claude Code project sessions with size and age
+- **Session info** — inspect sessions for a specific project directory
+- **Session relocation** — move sessions when a project folder is relocated
+- **Session cleanup** — remove orphaned sessions for projects that no longer exist
 
 ### Environment Snapshots
-- **Snapshot capture**: Save the current Claude Code environment state (settings, MCP config, credentials metadata)
-- **Snapshot restore**: Roll back to a previous environment configuration
-- **Snapshot management**: List and delete saved snapshots
-- **MCP audit**: Audit configured MCP servers and flag those with CLI alternatives
+- **Snapshot capture** — save current Claude Code environment (settings, MCP config, CLAUDE.md)
+- **Snapshot restore** — roll back to a previous environment configuration
+- **MCP audit** — flag MCP servers with CLI alternatives to save tokens
+
+### Health & Maintenance
+- **Doctor** — scan `~/.claude/` for stale locks, log bloat, cache size, orphaned sessions
+- **Clean** — targeted cleanup for debug logs, telemetry, todos, cache, history
+- **Auto-fix** — `ccm doctor --fix` resolves safe issues automatically
+
+### Token Optimization
+- **Optimize** — analyze context window footprint and suggest reductions
+- **Plugin audit** — flag unused plugins inflating token usage
+- **CLAUDE.md analysis** — warn if global instructions are too large
 
 ### Usage Statistics
-- **Summary**: View total projects, sessions, disk usage, and session age distribution
-- **Top projects**: Rank projects by disk usage to identify space hogs
+- **Summary** — total projects, sessions, disk usage at a glance
+- **Top projects** — rank projects by disk usage to identify space hogs
 
 ## Installation
 
@@ -45,16 +54,24 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash
 ```
 
-This installs `ccm` to `~/.ccm/bin/` and adds it to your `$PATH` automatically. No `sudo` required.
+Installs to `~/.ccm/bin/` and adds to your `$PATH` automatically. No `sudo` required.
 
 After install, restart your terminal (or `source ~/.zshrc`) and run:
 ```bash
 ccm version
 ```
 
-### Manual install
+### Install as a Skill
 
-If you prefer to install manually:
+If you use Claude Code (or Cursor, Codex, Gemini CLI, etc.):
+
+```bash
+npx skills add dr5hn/ccm@ccm
+```
+
+This teaches your AI agent about all CCM commands and workflows.
+
+### Manual Install
 
 ```bash
 mkdir -p ~/.ccm/bin && curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ~/.ccm/bin/ccm && chmod +x ~/.ccm/bin/ccm
@@ -68,34 +85,26 @@ export PATH="$HOME/.ccm/bin:$PATH"
 ### Requirements
 
 - Bash 4.4+
-- `jq` (JSON processor)
-
-**macOS:**
-```bash
-brew install jq
-```
-
-**Ubuntu/Debian:**
-```bash
-sudo apt install jq
-```
+- `jq` — install with `brew install jq` (macOS) or `sudo apt install jq` (Linux)
 
 ## Quick Start
 
 ```bash
-# 1. Log into Claude Code with your first account
-# 2. Add it to CCM
-./ccm.sh add
+# Add your current Claude Code account
+ccm add
+ccm alias 1 personal
 
-# 3. Log out, log into your second account
-# 4. Add it too
-./ccm.sh add
+# Log into another account, then add it too
+ccm add
+ccm alias 2 work
 
-# 5. Switch between accounts
-./ccm.sh switch
+# Switch between accounts
+ccm switch work
+ccm switch personal
+ccm undo                    # revert last switch
 
-# 6. Or use the interactive menu
-./ccm.sh interactive
+# Launch interactive menu
+ccm interactive
 ```
 
 After each switch, restart Claude Code to use the new authentication.
@@ -106,18 +115,17 @@ After each switch, restart Claude Code to use the new authentication.
 
 ```bash
 ccm add                        # Add current Claude Code account
-ccm remove <email|alias|num>   # Remove a managed account
-ccm switch                     # Switch to next account in sequence
-ccm switch <target>         # Switch to account by number, email, or alias
+ccm remove <id>                # Remove by number, email, or alias
+ccm switch [id]                # Switch to next account, or specific target
 ccm undo                       # Revert to the previous account
-ccm list                       # List all managed accounts with metadata
-ccm status                     # Show detailed status of the active account
-ccm alias <account> <name>     # Set a friendly alias for an account
-ccm verify [account]           # Verify backup integrity (all or specific)
-ccm history                    # View account switch history
-ccm export <file.tar.gz>       # Export accounts to archive
-ccm import <file.tar.gz>       # Import accounts from archive
-ccm interactive                # Launch the interactive menu
+ccm list                       # List all managed accounts
+ccm status                     # Show active account details
+ccm alias <id> <name>          # Set a friendly alias
+ccm verify [id]                # Verify backup integrity
+ccm history                    # View switch history
+ccm export <path>              # Export accounts to archive
+ccm import <path>              # Import from archive
+ccm interactive                # Launch interactive menu
 ```
 
 ### Session Management
@@ -125,7 +133,7 @@ ccm interactive                # Launch the interactive menu
 ```bash
 ccm session list                       # List all project sessions
 ccm session info <project-path>        # Show sessions for a project (use . for cwd)
-ccm session relocate <old> <new>       # Relocate sessions after moving a project
+ccm session relocate <old> <new>       # Update sessions after moving a project
 ccm session clean [--dry-run]          # Remove orphaned sessions
 ```
 
@@ -134,115 +142,127 @@ ccm session clean [--dry-run]          # Remove orphaned sessions
 ```bash
 ccm env snapshot [name]                # Capture environment state
 ccm env restore <name> [--force]       # Restore a saved snapshot
-ccm env list                           # List all saved snapshots
+ccm env list                           # List all snapshots
 ccm env delete <name>                  # Delete a snapshot
-ccm env audit                          # Audit MCP servers for CLI alternatives
+ccm env audit                          # Audit MCP servers for token efficiency
+```
+
+### Health & Maintenance
+
+```bash
+ccm doctor                             # Scan for health issues
+ccm doctor --fix                       # Auto-fix safe issues
+ccm clean debug [--days N]             # Clean debug logs (default: 30 days)
+ccm clean telemetry                    # Remove telemetry data
+ccm clean todos [--days N]             # Remove old todo files
+ccm clean history [--keep N]           # Trim history (default: keep 1000)
+ccm clean cache                        # Clean plugin cache
+ccm clean all [--dry-run]              # Clean everything safe
+```
+
+### Token Optimization
+
+```bash
+ccm optimize                           # Analyze token usage and suggest reductions
 ```
 
 ### Usage Statistics
 
 ```bash
-ccm usage summary                      # Show usage overview
-ccm usage top [--count N]              # Show top N projects by disk usage
+ccm usage summary                      # Usage overview
+ccm usage top [--count N]              # Top projects by disk usage
 ```
 
 ### Global Options
 
 ```bash
-ccm --no-color <command>               # Disable colored output
+ccm help [module]                      # Show help (doctor, clean, optimize, session, env, usage)
 ccm version                            # Show version
-ccm help                               # Show general help
-ccm help session                       # Show session module help
-ccm help env                           # Show environment module help
-ccm help usage                         # Show usage module help
+ccm --no-color <command>               # Disable colored output
 ```
 
 ## Examples
 
-### Managing Multiple Accounts
+### Daily Account Switching
 
 ```bash
-# Set aliases for quick reference
-./ccm.sh alias 1 work
-./ccm.sh alias 2 personal
-
-# Switch by alias
-./ccm.sh switch work
-
-# View history
-./ccm.sh history
-
-# Oops, switch back
-./ccm.sh undo
+ccm switch work        # switch to work account
+ccm switch personal    # switch back
+ccm undo               # oops, revert
+ccm history            # see recent switches
 ```
 
-### Cleaning Up Sessions
+### Disk Cleanup
 
 ```bash
-# See what would be removed
-./ccm.sh session clean --dry-run
+ccm doctor             # see what's eating space
+ccm doctor --fix       # auto-fix safe issues
+ccm clean all --dry-run # preview all cleanups
+ccm session clean      # remove orphaned sessions
+ccm usage top          # find biggest projects
+```
 
-# Actually remove orphaned sessions
-./ccm.sh session clean
+### Token Optimization
 
-# Check disk usage
-./ccm.sh usage summary
-./ccm.sh usage top --count 5
+```bash
+ccm optimize           # full context window analysis
+ccm env audit          # check MCP servers for CLI alternatives
 ```
 
 ### Environment Snapshots
 
 ```bash
-# Save state before a big change
-./ccm.sh env snapshot before-upgrade
-
-# Make changes to MCP config, settings, etc.
-# ...
-
-# Something went wrong? Restore
-./ccm.sh env restore before-upgrade
-
-# Audit MCP servers
-./ccm.sh env audit
+ccm env snapshot before-experiment
+# ... make risky config changes ...
+ccm env restore before-experiment  # roll back if needed
 ```
 
-### Export and Import
+### Moving a Project
 
 ```bash
-# Backup all accounts
-./ccm.sh export ~/ccm-backup.tar.gz
-
-# Restore on another machine
-./ccm.sh import ~/ccm-backup.tar.gz
+# After moving ~/old-project to ~/new-location/project:
+ccm session relocate ~/old-project ~/new-location/project
 ```
 
 ## How It Works
 
-CCM stores account authentication data separately from Claude Code:
+CCM stores account data separately from Claude Code:
 
-- **macOS**: Credentials in Keychain, OAuth info in `~/.claude-switch-backup/`
-- **Linux/WSL**: Both credentials and OAuth info in `~/.claude-switch-backup/` with restricted permissions (600)
+- **macOS**: Credentials in Keychain, OAuth config in `~/.claude-switch-backup/`
+- **Linux/WSL**: Both stored in `~/.claude-switch-backup/` with restricted permissions (600)
 
-When switching accounts, CCM:
-1. Backs up the current account's authentication data
-2. Restores the target account's authentication data
-3. Updates Claude Code's authentication files
+When switching accounts, CCM backs up the current account, restores the target, and updates Claude Code's auth files. Sessions, settings, and preferences are preserved.
 
-Sessions are stored in `~/.claude/projects/`. Environment snapshots are saved to `~/.claude-switch-backup/snapshots/`.
+### Storage Locations
+
+| Data | Location |
+|------|----------|
+| Account configs & credentials | `~/.claude-switch-backup/` |
+| Environment snapshots | `~/.claude-switch-backup/snapshots/` |
+| Project sessions | `~/.claude/projects/` |
+| CCM binary | `~/.ccm/bin/ccm` |
 
 ## Troubleshooting
 
 ### Switch fails or account not recognized
 
 ```bash
-# Check managed accounts
-./ccm.sh list
+ccm list               # check managed accounts
+ccm verify             # validate backups
+ccm undo               # revert to previous
+```
 
-# Verify backup integrity
-./ccm.sh verify
+### Claude Code doesn't use the new account after switch
 
-# Revert to previous account
-./ccm.sh undo
+Restart Claude Code after every switch. Verify with `ccm status`.
+
+### Disk usage is high
+
+```bash
+ccm doctor             # full health check
+ccm usage top          # find space hogs
+ccm session clean      # remove orphaned sessions
+ccm clean all          # clean logs, telemetry, cache
 ```
 
 ### Cannot add an account
@@ -251,50 +271,28 @@ Sessions are stored in `~/.claude/projects/`. Environment snapshots are saved to
 - Verify `jq` is installed: `jq --version`
 - Check write permissions to your home directory
 
-### Claude Code does not use the new account after switch
-
-- Restart Claude Code after every switch
-- Check the active account: `./ccm.sh status`
-- Verify the account: `./ccm.sh verify`
-
-### Disk usage is high
+## Uninstall
 
 ```bash
-# Identify large projects
-./ccm.sh usage top
+# Remove the binary
+rm -f ~/.ccm/bin/ccm
 
-# Remove orphaned sessions
-./ccm.sh session clean --dry-run
-./ccm.sh session clean
-```
+# Remove the PATH entry from your shell profile
+# (delete the "# CCM" lines from ~/.zshrc or ~/.bashrc)
 
-### Environment restore fails
-
-- List available snapshots: `./ccm.sh env list`
-- Use `--force` to overwrite existing files: `./ccm.sh env restore <name> --force`
-
-## Cleanup / Uninstall
-
-```bash
-# Note your current active account
-./ccm.sh list
-
-# Remove backup data
+# Optionally remove backup data
 rm -rf ~/.claude-switch-backup
-
-# Delete the script
-rm ccm.sh
 ```
 
 Your current Claude Code login will remain active.
 
-## Security Notes
+## Security
 
 - Credentials stored in macOS Keychain or files with 600 permissions
-- Authentication files are stored with restricted permissions
-- All inputs are validated and sanitised before processing
-- No use of `eval` or unsanitised shell calls
+- Snapshot capture strips tokens/credentials from config files
+- All inputs validated and sanitized before processing
+- No use of `eval` or unsanitized shell calls
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE) for details.
