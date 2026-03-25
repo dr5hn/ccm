@@ -459,6 +459,79 @@ body {
   color: var(--text-secondary);
   line-height: 1.5;
 }
+
+/* ══════════════ HOW IT WORKS ══════════════ */
+.how-it-works {
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.steps {
+  display: flex;
+  gap: 40px;
+  justify-content: center;
+  align-items: flex-start;
+  position: relative;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.steps::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  border-top: 2px dashed rgba(56,189,248,0.2);
+}
+
+.step {
+  flex: 1;
+  position: relative;
+  z-index: 1;
+}
+
+.step-number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background-image: linear-gradient(var(--bg-primary), var(--bg-primary)), linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
+  background-origin: border-box;
+  background-clip: padding-box, border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--accent-cyan);
+  margin: 0 auto 12px;
+}
+
+.step-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.step-cmd {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--accent-cyan);
+  background: rgba(56,189,248,0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.step-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
 </style>
 </head>
 <body>
@@ -575,7 +648,31 @@ body {
     </div>
   </div>
 </section>
-  <section class="how-it-works" id="how-it-works"></section>
+  <section class="how-it-works" id="how-it-works">
+  <div class="container">
+    <div class="section-label">Get Started In 30 Seconds</div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-number">1</div>
+        <div class="step-title">Install</div>
+        <code class="step-cmd">curl -fsSL .../install.sh | bash</code>
+        <div class="step-desc">One command, no sudo required. Works on macOS, Linux, WSL.</div>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <div class="step-title">Add your accounts</div>
+        <code class="step-cmd">ccm add</code>
+        <div class="step-desc">Run once per account. CCM detects your active Claude Code credentials.</div>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <div class="step-title">Switch anytime</div>
+        <code class="step-cmd">ccm switch work</code>
+        <div class="step-desc">Swap accounts instantly. Your sessions and config stay intact.</div>
+      </div>
+    </div>
+  </div>
+</section>
   <section class="install" id="install"></section>
   <section class="social-proof" id="social-proof"></section>
   <section class="commands" id="commands"></section>
