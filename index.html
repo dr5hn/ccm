@@ -126,7 +126,6 @@ body {
 
 /* ── Hero section ── */
 .hero {
-  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -174,6 +173,15 @@ body {
   position: relative;
   z-index: 1;
   max-width: 800px;
+}
+
+.hero-ascii {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  line-height: 1.2;
+  margin-bottom: 20px;
+  white-space: pre;
+  overflow-x: auto;
 }
 
 .hero-badge {
@@ -435,7 +443,7 @@ body {
 
 .features-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
@@ -444,7 +452,7 @@ body {
 }
 
 .feature-icon {
-  font-size: 20px;
+  font-size: 32px;
   color: var(--accent-cyan);
   margin-bottom: 12px;
   font-family: 'JetBrains Mono', monospace;
@@ -783,10 +791,12 @@ body {
 /* ══════════════ RESPONSIVE ══════════════ */
 @media (max-width: 768px) {
   .hero { padding: 40px 20px; min-height: auto; }
+  .hero-ascii { font-size: 10px; }
   .hero-headline { font-size: 32px; }
   .hero-install { font-size: 11px; flex-wrap: wrap; justify-content: center; }
   .pain-points { flex-direction: column; align-items: center; }
-  .features-grid { grid-template-columns: 1fr; }
+  .features-grid { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 560px) { .features-grid { grid-template-columns: 1fr; } }
   .steps {
     flex-direction: column;
     gap: 32px;
@@ -830,6 +840,12 @@ body {
       <div class="hero-orb hero-orb--violet"></div>
     </div>
     <div class="hero-content">
+      <pre class="hero-ascii gradient-text" aria-hidden="true"> ██████╗ ██████╗███╗   ███╗
+██╔════╝██╔════╝████╗ ████║
+██║     ██║     ██╔████╔██║
+██║     ██║     ██║╚██╔╝██║
+╚██████╗╚██████╗██║ ╚═╝ ██║
+ ╚═════╝ ╚═════╝╚═╝     ╚═╝</pre>
       <div class="hero-badge">★ Open Source · MIT License</div>
       <h1 class="hero-headline gradient-text">Manage multiple Claude Code accounts from one terminal</h1>
       <p class="hero-sub">Switch accounts, manage sessions, snapshot environments, and track usage — all without leaving your workflow.</p>
@@ -934,6 +950,18 @@ body {
         <div class="feature-cmd">ccm usage summary</div>
         <div class="feature-desc">See your Claude Code footprint. Disk usage, session counts, project breakdown.</div>
       </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊕</div>
+        <div class="feature-name">Health &amp; Maintenance</div>
+        <div class="feature-cmd">ccm doctor</div>
+        <div class="feature-desc">Scan for stale locks, log bloat, cache issues. Auto-fix with --fix. Targeted cleanup for logs, telemetry, cache.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊘</div>
+        <div class="feature-name">Token Optimization</div>
+        <div class="feature-cmd">ccm optimize</div>
+        <div class="feature-desc">Analyze context window footprint. Flag unused plugins and oversized CLAUDE.md files inflating token usage.</div>
+      </div>
     </div>
   </div>
 </section>
@@ -972,6 +1000,7 @@ body {
       <button class="copy-btn" id="mainCopyBtn">COPY</button>
     </div>
     <div class="install-note">Requires: bash 4.4+, jq · Works on macOS, Linux, WSL</div>
+    <div class="install-alt" style="margin-bottom: 4px;">Or install as a skill: <code>npx skills add dr5hn/ccm@ccm</code></div>
     <div class="install-alt">Or clone manually: <code>git clone https://github.com/dr5hn/ccm.git &amp;&amp; cd ccm &amp;&amp; ./install.sh</code></div>
   </div>
 </section>
@@ -1049,6 +1078,43 @@ body {
           <tr><td>ccm env list</td><td>List snapshots</td></tr>
           <tr><td>ccm env delete &lt;name&gt;</td><td>Remove a snapshot</td></tr>
           <tr><td>ccm env audit</td><td>Audit MCP token efficiency</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="cmd-group" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Health &amp; Maintenance</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">8 commands</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm doctor</td><td>Scan for health issues</td></tr>
+          <tr><td>ccm doctor --fix</td><td>Auto-fix safe issues</td></tr>
+          <tr><td>ccm clean debug [--days N]</td><td>Clean debug logs (default: 30 days)</td></tr>
+          <tr><td>ccm clean telemetry</td><td>Remove telemetry data</td></tr>
+          <tr><td>ccm clean todos [--days N]</td><td>Remove old todo files</td></tr>
+          <tr><td>ccm clean history [--keep N]</td><td>Trim history (default: keep 1000)</td></tr>
+          <tr><td>ccm clean cache</td><td>Clean plugin cache</td></tr>
+          <tr><td>ccm clean all [--dry-run]</td><td>Clean everything safe</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="cmd-group" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Token Optimization</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">1 command</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm optimize</td><td>Analyze token usage and suggest reductions</td></tr>
         </table>
       </div>
     </div>
