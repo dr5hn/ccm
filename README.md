@@ -41,8 +41,23 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 
 ## Installation
 
+**One-liner** (installs to `/usr/local/bin` so `ccm` works globally):
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ccm.sh && chmod +x ccm.sh
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o /usr/local/bin/ccm && chmod +x /usr/local/bin/ccm
+```
+
+Or if you prefer `~/.local/bin` (no sudo needed):
+
+```bash
+mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ~/.local/bin/ccm && chmod +x ~/.local/bin/ccm
+```
+
+> Make sure `~/.local/bin` is in your `$PATH`. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile if needed.
+
+After install, just run:
+```bash
+ccm version
 ```
 
 ### Requirements

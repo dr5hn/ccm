@@ -623,7 +623,7 @@ body {
           <div class="section-label">// install</div>
           <div class="install-box" id="installBox" onclick="copyInstall()">
             <div class="install-text">
-              <span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ccm.sh &amp;&amp; chmod +x ccm.sh
+              <span class="prompt">$ </span>curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o /usr/local/bin/ccm &amp;&amp; chmod +x /usr/local/bin/ccm
             </div>
             <button class="copy-btn" id="copyBtn">[COPY]</button>
           </div>
@@ -843,7 +843,7 @@ document.querySelectorAll('.demo-tab').forEach(tab => {
 
 // ══════════════ COPY INSTALL ══════════════
 function copyInstall() {
-  const text = 'curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ccm.sh && chmod +x ccm.sh';
+  const text = 'curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o /usr/local/bin/ccm && chmod +x /usr/local/bin/ccm';
   navigator.clipboard.writeText(text).then(() => {
     const btn = document.getElementById('copyBtn');
     btn.textContent = '[COPIED]';
