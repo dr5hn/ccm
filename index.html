@@ -291,6 +291,55 @@ body {
   max-width: 620px;
   margin: 0 auto;
 }
+
+/* ══════════════ THE PROBLEM ══════════════ */
+.problem {
+  padding: 80px 24px;
+  text-align: center;
+}
+
+.problem-statement {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 32px;
+}
+
+.pain-points {
+  display: flex;
+  gap: 32px;
+  justify-content: center;
+  margin-bottom: 32px;
+}
+
+.pain-point {
+  flex: 1;
+  max-width: 240px;
+}
+
+.pain-icon {
+  font-size: 24px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.pain-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.pain-desc {
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.problem-transition {
+  font-size: 15px;
+  color: var(--text-muted);
+}
 </style>
 </head>
 <body>
@@ -332,7 +381,30 @@ body {
       </div>
     </div>
   </section>
-  <section class="problem" id="problem"></section>
+  <section class="problem" id="problem">
+    <div class="container">
+      <div class="section-label">The Problem</div>
+      <h2 class="problem-statement">Claude Code wasn't built for multiple accounts.</h2>
+      <div class="pain-points">
+        <div class="pain-point">
+          <div class="pain-icon">⚙</div>
+          <div class="pain-title">Manual config swaps</div>
+          <div class="pain-desc">Editing ~/.claude/credentials every time you switch contexts</div>
+        </div>
+        <div class="pain-point">
+          <div class="pain-icon">◎</div>
+          <div class="pain-title">Orphaned sessions</div>
+          <div class="pain-desc">Stale project data silently eating your disk space</div>
+        </div>
+        <div class="pain-point">
+          <div class="pain-icon">◻</div>
+          <div class="pain-title">No visibility</div>
+          <div class="pain-desc">No way to see which account is active or how much space Claude uses</div>
+        </div>
+      </div>
+      <p class="problem-transition">CCM fixes all of this with a single command.</p>
+    </div>
+  </section>
   <section class="demo" id="demo"></section>
   <section class="features" id="features"></section>
   <section class="how-it-works" id="how-it-works"></section>
