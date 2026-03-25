@@ -82,6 +82,21 @@ Then add to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
 export PATH="$HOME/.ccm/bin:$PATH"
 ```
 
+### Update
+
+Re-run the installer to update to the latest version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash
+```
+
+Or manually:
+```bash
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ~/.ccm/bin/ccm && chmod +x ~/.ccm/bin/ccm
+```
+
+Check your current version with `ccm version`.
+
 ### Requirements
 
 - Bash 4.4+
