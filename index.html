@@ -959,6 +959,8 @@ body {
       <button class="demo-tab" data-demo="sessions">sessions</button>
       <button class="demo-tab" data-demo="env">env</button>
       <button class="demo-tab" data-demo="usage">usage</button>
+      <button class="demo-tab" data-demo="doctor">doctor</button>
+      <button class="demo-tab" data-demo="optimize">optimize</button>
     </div>
     <div class="demo-terminal terminal-window">
       <div class="terminal-titlebar">
@@ -1276,6 +1278,45 @@ var demos = {
     { type: 'output', text: '  1  ~/projects/my-saas-app         23  80 MB  just now' },
     { type: 'output', text: '  2  ~/projects/csc-app              11  64 MB  7 hours ago' },
     { type: 'output', text: '  3  ~/projects/teamwork-cli         11  32 MB  5 hours ago' }
+  ],
+  doctor: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm doctor' },
+    { type: 'blank' },
+    { type: 'output', text: 'Health Check Report' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ Auth files intact' },
+    { type: 'success', text: '✓ No stale lock files' },
+    { type: 'warn',   text: '⚠ Debug logs: 248 MB (124 files older than 30 days)' },
+    { type: 'warn',   text: '⚠ Plugin cache: 156 MB (3 unused plugins)' },
+    { type: 'success', text: '✓ Session registry consistent' },
+    { type: 'blank' },
+    { type: 'output', text: '2 issues found. Run ccm doctor --fix to resolve.' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm doctor --fix' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ Cleaned 124 old debug logs (freed 248 MB)' },
+    { type: 'success', text: '✓ Purged 3 unused plugin caches (freed 156 MB)' }
+  ],
+  optimize: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm optimize' },
+    { type: 'blank' },
+    { type: 'output', text: 'Token Optimization Report' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━━━━━' },
+    { type: 'blank' },
+    { type: 'warn',   text: '⚠ CLAUDE.md is 4,200 tokens (recommended: < 2,000)' },
+    { type: 'muted',  text: '  Tip: Move verbose sections to project docs' },
+    { type: 'blank' },
+    { type: 'warn',   text: '⚠ 2 plugins unused in last 30 days' },
+    { type: 'muted',  text: '  playwright, chrome-devtools — consider disabling' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ MCP servers: 3 active, all justified' },
+    { type: 'success', text: '✓ Memory files: 21 (within limits)' },
+    { type: 'blank' },
+    { type: 'output', text: 'Potential savings: ~3,200 tokens/request' }
   ]
 };
 
