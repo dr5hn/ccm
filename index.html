@@ -292,6 +292,16 @@ body {
   margin: 0 auto;
 }
 
+.hero::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(56,189,248,0.2), transparent);
+}
+
 /* ══════════════ THE PROBLEM ══════════════ */
 .problem {
   padding: 80px 24px;
