@@ -417,6 +417,48 @@ body {
 .t-muted { color: var(--text-muted); opacity: 0.7; }
 .t-warn { color: var(--accent-amber); }
 .t-active { color: var(--accent-green); }
+
+/* ══════════════ FEATURES ══════════════ */
+.features {
+  padding: 80px 24px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.feature-card {
+  padding: 24px;
+}
+
+.feature-icon {
+  font-size: 20px;
+  color: var(--accent-cyan);
+  margin-bottom: 12px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.feature-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.feature-cmd {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: var(--accent-cyan);
+  margin-bottom: 10px;
+}
+
+.feature-desc {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
 </style>
 </head>
 <body>
@@ -502,7 +544,37 @@ body {
     </div>
   </div>
 </section>
-  <section class="features" id="features"></section>
+  <section class="features" id="features">
+  <div class="container">
+    <div class="section-label">What's Inside</div>
+    <div class="features-grid">
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⟩_</div>
+        <div class="feature-name">Account Switching</div>
+        <div class="feature-cmd">ccm switch &lt;id&gt;</div>
+        <div class="feature-desc">Rotate between accounts in one command. Aliases, history, undo, import/export.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊞</div>
+        <div class="feature-name">Session Management</div>
+        <div class="feature-cmd">ccm session list</div>
+        <div class="feature-desc">List, inspect, relocate, and clean orphaned sessions eating your disk.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊡</div>
+        <div class="feature-name">Environment Snapshots</div>
+        <div class="feature-cmd">ccm env snapshot</div>
+        <div class="feature-desc">Save and restore your Claude Code config. Audit MCP servers for token waste.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊟</div>
+        <div class="feature-name">Usage Stats</div>
+        <div class="feature-cmd">ccm usage summary</div>
+        <div class="feature-desc">See your Claude Code footprint. Disk usage, session counts, project breakdown.</div>
+      </div>
+    </div>
+  </div>
+</section>
   <section class="how-it-works" id="how-it-works"></section>
   <section class="install" id="install"></section>
   <section class="social-proof" id="social-proof"></section>
