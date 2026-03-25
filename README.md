@@ -41,23 +41,28 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 
 ## Installation
 
-**One-liner** (installs to `/usr/local/bin` so `ccm` works globally):
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o /usr/local/bin/ccm && chmod +x /usr/local/bin/ccm
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash
 ```
 
-Or if you prefer `~/.local/bin` (no sudo needed):
+This installs `ccm` to `~/.ccm/bin/` and adds it to your `$PATH` automatically. No `sudo` required.
 
-```bash
-mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ~/.local/bin/ccm && chmod +x ~/.local/bin/ccm
-```
-
-> Make sure `~/.local/bin` is in your `$PATH`. Add `export PATH="$HOME/.local/bin:$PATH"` to your shell profile if needed.
-
-After install, just run:
+After install, restart your terminal (or `source ~/.zshrc`) and run:
 ```bash
 ccm version
+```
+
+### Manual install
+
+If you prefer to install manually:
+
+```bash
+mkdir -p ~/.ccm/bin && curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/ccm.sh -o ~/.ccm/bin/ccm && chmod +x ~/.ccm/bin/ccm
+```
+
+Then add to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.):
+```bash
+export PATH="$HOME/.ccm/bin:$PATH"
 ```
 
 ### Requirements
