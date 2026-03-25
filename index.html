@@ -740,6 +740,77 @@ body {
 .cmd-table td:last-child {
   color: var(--text-muted);
 }
+
+/* ══════════════ SCROLL REVEAL ══════════════ */
+.reveal {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ══════════════ ACCESSIBILITY ══════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+  .term-line {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ══════════════ RESPONSIVE ══════════════ */
+@media (max-width: 768px) {
+  .hero { padding: 40px 20px; min-height: auto; }
+  .hero-headline { font-size: 32px; }
+  .hero-install { font-size: 11px; flex-wrap: wrap; justify-content: center; }
+  .pain-points { flex-direction: column; align-items: center; }
+  .features-grid { grid-template-columns: 1fr; }
+  .steps {
+    flex-direction: column;
+    gap: 32px;
+    align-items: flex-start;
+    padding-left: 56px;
+  }
+  .steps::before {
+    left: 18px;
+    right: auto;
+    top: 36px;
+    bottom: 36px;
+    width: 0;
+    height: auto;
+    border-top: none;
+    border-left: 2px dashed rgba(56,189,248,0.2);
+  }
+  .step { text-align: left; }
+  .step-number {
+    position: absolute;
+    left: -56px;
+    top: 0;
+  }
+  .demo-tabs { flex-wrap: wrap; justify-content: center; }
+  .demo-terminal .terminal-body { font-size: 11px; overflow-x: auto; }
+  .install-box { flex-direction: column; align-items: stretch; text-align: center; }
+  .cmd-table td:first-child { width: auto; white-space: normal; }
+}
+
+@media (max-width: 480px) {
+  .hero-headline { font-size: 26px; }
+  .hero-sub { font-size: 15px; }
+  .hero-install .cmd { font-size: 10px; word-break: break-all; }
+  .problem-statement { font-size: 22px; }
+}
 </style>
 </head>
 <body>
@@ -782,7 +853,7 @@ body {
     </div>
   </section>
   <section class="problem" id="problem">
-    <div class="container">
+    <div class="container reveal">
       <div class="section-label">The Problem</div>
       <h2 class="problem-statement">Claude Code wasn't built for multiple accounts.</h2>
       <div class="pain-points">
@@ -806,7 +877,7 @@ body {
     </div>
   </section>
   <section class="demo" id="demo">
-  <div class="container">
+  <div class="container reveal">
     <div class="section-label" style="text-align:center">See It In Action</div>
     <div class="demo-tabs">
       <button class="demo-tab active" data-demo="accounts">accounts</button>
@@ -826,7 +897,7 @@ body {
   </div>
 </section>
   <section class="features" id="features">
-  <div class="container">
+  <div class="container reveal">
     <div class="section-label">What's Inside</div>
     <div class="features-grid">
       <div class="feature-card glass-card">
@@ -857,7 +928,7 @@ body {
   </div>
 </section>
   <section class="how-it-works" id="how-it-works">
-  <div class="container">
+  <div class="container reveal">
     <div class="section-label">Get Started In 30 Seconds</div>
     <div class="steps">
       <div class="step">
@@ -882,7 +953,7 @@ body {
   </div>
 </section>
   <section class="install" id="install">
-  <div class="container">
+  <div class="container reveal">
     <div class="section-label">Install</div>
     <div class="install-box glass-card" onclick="copyInstallMain()">
       <div class="install-text">
@@ -906,7 +977,7 @@ body {
   </div>
 </section>
   <section class="commands" id="commands">
-  <div class="container">
+  <div class="container reveal">
     <div class="section-label">Command Reference</div>
 
     <div class="cmd-group open" data-accordion>
@@ -1189,6 +1260,16 @@ function renderDemo(name) {
 document.querySelectorAll('.demo-tab').forEach(function(tab) {
   tab.addEventListener('click', function() { renderDemo(tab.dataset.demo); });
 });
+
+var observer = new IntersectionObserver(function(entries) {
+  entries.forEach(function(entry) {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.reveal').forEach(function(el) { observer.observe(el); });
 
 window.addEventListener('load', function() {
   setTimeout(function() { renderDemo('accounts'); }, 600);
