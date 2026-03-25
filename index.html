@@ -633,6 +633,113 @@ body {
 .footer a:hover {
   color: var(--accent-cyan);
 }
+
+/* ══════════════ COMMAND REFERENCE ══════════════ */
+.commands {
+  padding: 80px 24px;
+}
+
+.cmd-group {
+  margin-bottom: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cmd-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 8px;
+}
+
+.cmd-group.open .cmd-group-header {
+  border-radius: 8px 8px 0 0;
+  border-bottom-color: transparent;
+}
+
+.cmd-group-header:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+.cmd-group-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cmd-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cmd-count {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.05);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.cmd-chevron {
+  color: var(--text-muted);
+  transition: transform 0.3s;
+  font-size: 12px;
+}
+
+.cmd-group.open .cmd-chevron {
+  transform: rotate(180deg);
+}
+
+.cmd-group-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  border: 1px solid var(--border-card);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+}
+
+.cmd-group.open .cmd-group-body {
+  max-height: 600px;
+}
+
+.cmd-table {
+  width: 100%;
+  padding: 12px 20px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+
+.cmd-table tr {
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+}
+
+.cmd-table tr:last-child {
+  border-bottom: none;
+}
+
+.cmd-table td {
+  padding: 6px 0;
+  vertical-align: top;
+}
+
+.cmd-table td:first-child {
+  color: var(--text-primary);
+  white-space: nowrap;
+  padding-right: 24px;
+  width: 280px;
+}
+
+.cmd-table td:last-child {
+  color: var(--text-muted);
+}
 </style>
 </head>
 <body>
@@ -798,7 +905,90 @@ body {
     <span>Zero dependencies beyond jq</span>
   </div>
 </section>
-  <section class="commands" id="commands"></section>
+  <section class="commands" id="commands">
+  <div class="container">
+    <div class="section-label">Command Reference</div>
+
+    <div class="cmd-group open" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Account Management</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">12 commands</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm add</td><td>Add current account</td></tr>
+          <tr><td>ccm remove &lt;id&gt;</td><td>Remove account by number, email, or alias</td></tr>
+          <tr><td>ccm switch [id]</td><td>Switch account (next or specific)</td></tr>
+          <tr><td>ccm undo</td><td>Revert last switch</td></tr>
+          <tr><td>ccm list</td><td>List managed accounts</td></tr>
+          <tr><td>ccm status</td><td>Active account details</td></tr>
+          <tr><td>ccm alias &lt;id&gt; &lt;name&gt;</td><td>Set account alias</td></tr>
+          <tr><td>ccm verify [id]</td><td>Verify backup integrity</td></tr>
+          <tr><td>ccm history</td><td>Show switch history</td></tr>
+          <tr><td>ccm export &lt;path&gt;</td><td>Export accounts to archive</td></tr>
+          <tr><td>ccm import &lt;path&gt;</td><td>Import from archive</td></tr>
+          <tr><td>ccm interactive</td><td>Interactive menu mode</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="cmd-group" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Session Management</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">4 commands</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm session list</td><td>List all project sessions</td></tr>
+          <tr><td>ccm session info &lt;path&gt;</td><td>Session details for a project</td></tr>
+          <tr><td>ccm session relocate &lt;old&gt; &lt;new&gt;</td><td>Move sessions after project relocation</td></tr>
+          <tr><td>ccm session clean [--dry-run]</td><td>Remove orphaned sessions</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="cmd-group" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Environment</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">5 commands</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm env snapshot [name]</td><td>Save current environment</td></tr>
+          <tr><td>ccm env restore &lt;name&gt; [--force]</td><td>Restore from snapshot</td></tr>
+          <tr><td>ccm env list</td><td>List snapshots</td></tr>
+          <tr><td>ccm env delete &lt;name&gt;</td><td>Remove a snapshot</td></tr>
+          <tr><td>ccm env audit</td><td>Audit MCP token efficiency</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="cmd-group" data-accordion>
+      <div class="cmd-group-header" onclick="toggleAccordion(this)">
+        <span class="cmd-group-title">Usage Stats</span>
+        <div class="cmd-group-meta">
+          <span class="cmd-count">2 commands</span>
+          <span class="cmd-chevron">▼</span>
+        </div>
+      </div>
+      <div class="cmd-group-body">
+        <table class="cmd-table">
+          <tr><td>ccm usage summary</td><td>Claude Code footprint overview</td></tr>
+          <tr><td>ccm usage top [--count N]</td><td>Top projects by disk usage</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
   <footer class="footer" id="footer">
   MIT License · <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener">GitHub</a> · Made for Claude Code power users
 </footer>
@@ -1003,6 +1193,15 @@ document.querySelectorAll('.demo-tab').forEach(function(tab) {
 window.addEventListener('load', function() {
   setTimeout(function() { renderDemo('accounts'); }, 600);
 });
+
+function toggleAccordion(header) {
+  var group = header.parentElement;
+  var wasOpen = group.classList.contains('open');
+  document.querySelectorAll('.cmd-group').forEach(function(g) { g.classList.remove('open'); });
+  if (!wasOpen) {
+    group.classList.add('open');
+  }
+}
 </script>
 </body>
 </html>
