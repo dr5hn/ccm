@@ -289,7 +289,10 @@ write_credentials() {
             ;;
         linux|wsl)
             mkdir -p "$HOME/.claude"
-            printf '%s' "$credentials" > "$HOME/.claude/.credentials.json"
+            local tmp
+            tmp=$(mktemp "$HOME/.claude/.credentials.XXXXXX")
+            printf '%s' "$credentials" > "$tmp"
+            mv "$tmp" "$HOME/.claude/.credentials.json"
             chmod 600 "$HOME/.claude/.credentials.json"
             ;;
     esac
@@ -331,7 +334,10 @@ write_account_credentials() {
             ;;
         linux|wsl)
             local cred_file="$BACKUP_DIR/credentials/.claude-credentials-${account_num}-${email}.json"
-            printf '%s' "$credentials" > "$cred_file"
+            local tmp
+            tmp=$(mktemp "${cred_file}.XXXXXX")
+            printf '%s' "$credentials" > "$tmp"
+            mv "$tmp" "$cred_file"
             chmod 600 "$cred_file"
             ;;
     esac
@@ -357,7 +363,10 @@ write_account_config() {
     local config="$3"
     local config_file="$BACKUP_DIR/configs/.claude-config-${account_num}-${email}.json"
     
-    echo "$config" > "$config_file"
+    local tmp
+    tmp=$(mktemp "${config_file}.XXXXXX")
+    echo "$config" > "$tmp"
+    mv "$tmp" "$config_file"
     chmod 600 "$config_file"
 }
 
@@ -1255,6 +1264,7 @@ cmd_remove_account() {
     updated_sequence=$(jq --arg num "$account_num" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
         del(.accounts[$num]) |
         .sequence = (.sequence | map(select(. != ($num | tonumber)))) |
+        .bindings = (.bindings // {} | with_entries(select(.value != ($num | tonumber | tostring)))) |
         .lastUpdated = $now
     ' "$SEQUENCE_FILE")
 
@@ -2041,7 +2051,19 @@ cmd_reorder() {
         return 1
     fi
 
-    # Now safe to rename credential files (two-pass to avoid collisions)
+    # Update bindings to reference new account numbers
+    updated_sequence=$(echo "$updated_sequence" | jq --argjson map "$map_json" '
+        .bindings = (.bindings // {} | with_entries(
+            .value = (. as $v | if $map[$v | tostring] != null then ($map[$v | tostring] | tostring) else $v end)
+        ))
+    ')
+
+    # Write sequence.json FIRST — if interrupted after this point,
+    # credential files can be recovered by re-running reorder
+    write_json "$SEQUENCE_FILE" "$updated_sequence"
+    invalidate_cache
+
+    # Now rename credential files (two-pass to avoid collisions)
     # Pass 1: rename to temp names
     for old_num in "${!num_map[@]}"; do
         local new_num=${num_map[$old_num]}
@@ -2102,9 +2124,6 @@ cmd_reorder() {
         fi
     done
 
-    # Write the pre-validated sequence.json
-    write_json "$SEQUENCE_FILE" "$updated_sequence"
-    invalidate_cache
     complete_progress
 
     # Show new state
@@ -4387,6 +4406,11 @@ clean_history() {
             *)      log_error "Unknown option '$1'"; return 1 ;;
         esac
     done
+
+    if ! [[ "$keep" =~ ^[0-9]+$ ]] || [[ "$keep" -eq 0 ]]; then
+        log_error "--keep must be a positive integer."
+        return 1
+    fi
 
     local history_file="$HOME/.claude/history.jsonl"
     if [[ ! -f "$history_file" ]]; then

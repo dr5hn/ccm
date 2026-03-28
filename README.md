@@ -308,6 +308,10 @@ Your current Claude Code login will remain active.
 - All inputs validated and sanitized before processing
 - No use of `eval` or unsanitized shell calls
 
+## Disclaimer
+
+This is a personal weekend project and is not affiliated with, endorsed by, or associated with Anthropic. "Claude Code" is a product of Anthropic. This tool manages local configuration files and credentials on your machine — it does not interact with Anthropic's servers or APIs directly. Use at your own risk. Always back up your credentials before using any account management tool.
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
