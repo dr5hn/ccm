@@ -5024,7 +5024,7 @@ cmd_optimize() {
 # Purpose: Launches Claude Code with preset permission modes and terminal reset on exit
 # Parameters: [mode] [extra args...] — mode: auto|yolo|plan|safe (default: normal launch)
 # Returns: Exit code from claude process
-# Usage: cmd_launch | cmd_launch auto | cmd_launch yolo | cmd_launch plan
+# Usage: cmd_launch | cmd_launch auto | cmd_launch yolo | cmd_launch plan | cmd_launch safe
 cmd_launch() {
     local mode="${1:-}"
     local claude_bin
@@ -5279,7 +5279,7 @@ out/
     printf '%s' "$content" > "$target"
     log_success "Generated $target for: ${types[*]}"
     echo ""
-    echo "  Patterns added: $(grep -c '^[^#]' "$target" 2>/dev/null || echo "0") rules"
+    echo "  Patterns added: $(grep -cE '^[^#[:space:]]' "$target" 2>/dev/null || echo "0") rules"
     echo "  Edit $target to customize further."
 }
 
@@ -5347,7 +5347,13 @@ permissions_audit() {
 
             # Show duplicate rules
             if [[ "$allow_dupes" -gt 0 ]]; then
-                jq -r '[.permissions.allow // [] | .[] ] | group_by(.) | map(select(length > 1)) | .[] | "     \(.[0]) (x\(length))"' "$file" 2>/dev/null
+                jq -r '[.permissions.allow // [] | .[] ] | group_by(.) | map(select(length > 1)) | .[] | "     allow: \(.[0]) (x\(length))"' "$file" 2>/dev/null
+            fi
+            if [[ "$deny_dupes" -gt 0 ]]; then
+                jq -r '[.permissions.deny // [] | .[] ] | group_by(.) | map(select(length > 1)) | .[] | "     deny: \(.[0]) (x\(length))"' "$file" 2>/dev/null
+            fi
+            if [[ "$ask_dupes" -gt 0 ]]; then
+                jq -r '[.permissions.ask // [] | .[] ] | group_by(.) | map(select(length > 1)) | .[] | "     ask: \(.[0]) (x\(length))"' "$file" 2>/dev/null
             fi
         else
             echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} No duplicates"
@@ -5406,10 +5412,11 @@ permissions_audit() {
             echo "$fixed" > "${file}.tmp" && mv "${file}.tmp" "$file"
             chmod "$orig_perms" "$file"
 
-            local new_allow new_deny
+            local new_allow new_deny new_ask
             new_allow=$(echo "$fixed" | jq '[.permissions.allow // [] | .[]] | length')
             new_deny=$(echo "$fixed" | jq '[.permissions.deny // [] | .[]] | length')
-            local removed=$(( (allow_count + deny_count) - (new_allow + new_deny) ))
+            new_ask=$(echo "$fixed" | jq '[.permissions.ask // [] | .[]] | length')
+            local removed=$(( (allow_count + deny_count + ask_count) - (new_allow + new_deny + new_ask) ))
             log_step "  Removed $removed duplicate rule(s)"
         fi
 
