@@ -1,6 +1,6 @@
 ---
 name: ccm
-description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, MCP audit, or says "ccm", "doctor", "optimize tokens", "clean cache", "session list", "env snapshot".
+description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history".
 allowed-tools: Bash(ccm *), Bash(~/.ccm/bin/ccm *), Bash(curl -fsSL *install.sh*)
 ---
 
@@ -34,11 +34,15 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 |---------|-------------|
 | `ccm add` | Add current logged-in Claude account |
 | `ccm remove <id>` | Remove account by number, email, or alias |
-| `ccm switch [id]` | Switch to next account, or specific by number/email/alias |
+| `ccm switch [id]` | Switch to next account, specific, or project-bound |
 | `ccm undo` | Revert to previous account |
-| `ccm list` | List all managed accounts |
+| `ccm list` | List all managed accounts and project bindings |
 | `ccm status` | Show active account details |
 | `ccm alias <id> <name>` | Set friendly name (e.g., `ccm alias 1 work`) |
+| `ccm reorder <from> <to>` | Reorder account positions |
+| `ccm bind [path] <account>` | Bind project directory to an account |
+| `ccm unbind [path]` | Remove project binding |
+| `ccm bind list` | Show all project bindings |
 | `ccm verify [id]` | Verify backup integrity |
 | `ccm history` | Show recent switch history |
 | `ccm export <path>` | Export accounts to archive |
@@ -51,6 +55,7 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 |---------|-------------|
 | `ccm session list` | List all project sessions with size, age, status |
 | `ccm session info <project-path>` | Detailed info for a project's sessions |
+| `ccm session search <query> [--limit N]` | Full-text search across all sessions |
 | `ccm session relocate <old> <new>` | Update sessions after moving a project folder |
 | `ccm session clean [--dry-run]` | Find and remove orphaned sessions |
 
@@ -70,17 +75,20 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 |---------|-------------|
 | `ccm usage summary` | Claude Code footprint overview |
 | `ccm usage top [--count N]` | Top projects by disk usage |
+| `ccm usage history [--days N] [--project <path>]` | Token usage by project and day |
 
 ### Health & Maintenance
 
 | Command | Description |
 |---------|-------------|
-| `ccm doctor` | Scan for health issues (stale locks, bloated logs, cache) |
+| `ccm doctor` | 13 health checks (disk, tmp, processes, hooks, locks, cache) |
 | `ccm doctor --fix` | Auto-fix safe issues |
 | `ccm clean debug [--days N]` | Clean debug logs (default: older than 30 days) |
 | `ccm clean telemetry` | Remove telemetry data |
 | `ccm clean todos [--days N]` | Remove old todo files |
 | `ccm clean history [--keep N]` | Trim history.jsonl (default: keep 1000) |
+| `ccm clean tmp [--days N]` | Clean orphaned tmp output files (default: 1 day) |
+| `ccm clean processes` | Kill orphaned Claude subagent processes (macOS) |
 | `ccm clean cache` | Clean plugin cache (old versions) |
 | `ccm clean all [--dry-run]` | Clean everything safe to clean |
 
@@ -116,10 +124,33 @@ ccm switch personal    # switch back
 ccm undo               # revert last switch
 ```
 
+### Project-specific accounts
+```bash
+ccm bind ~/work/project work       # bind project to work account
+ccm bind ~/personal/side-project personal
+ccm bind list                      # show all bindings
+# Now `ccm switch` in a bound directory auto-switches to the right account
+```
+
+### Token usage analytics
+```bash
+ccm usage history                  # last 7 days, all projects
+ccm usage history --days 30        # last 30 days
+ccm usage history --project .      # current project only
+```
+
+### Search conversation history
+```bash
+ccm session search "error handling"       # find across all sessions
+ccm session search "API" --limit 5        # limit results
+```
+
 ### Disk cleanup
 ```bash
-ccm doctor             # see what's eating space
+ccm doctor             # see what's eating space (13 checks)
 ccm doctor --fix       # auto-fix safe issues
+ccm clean tmp          # clean orphaned tmp output files
+ccm clean processes    # kill leaked subagent processes
 ccm clean all --dry-run # preview all cleanups
 ```
 
@@ -149,3 +180,5 @@ ccm env restore before-experiment  # if things break
 - `ccm optimize` provides estimates — actual token counts vary by model and context
 - Environment snapshots do NOT capture credentials — only configuration
 - Session relocate updates both session files and memory references
+- Project bindings are auto-cleaned when an account is removed
+- Orphaned process detection is macOS only (ppid=1 unreliable on Linux)
