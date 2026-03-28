@@ -5173,7 +5173,8 @@ eval "$(echo "$input" | jq -r '
     "RL5_PCT=\(.rate_limits.five_hour.used_percentage // "" | tostring)",
     "RL5_RESET=\(.rate_limits.five_hour.resets_at // "" | tostring)",
     "RL7_PCT=\(.rate_limits.seven_day.used_percentage // "" | tostring)",
-    "RL7_RESET=\(.rate_limits.seven_day.resets_at // "" | tostring)"
+    "RL7_RESET=\(.rate_limits.seven_day.resets_at // "" | tostring)",
+    "CC_VER=\(.version // "" | @sh)"
 ' 2>/dev/null)"
 
 TOKENS=$((IN_TOK + CC_TOK + CR_TOK))
@@ -5308,9 +5309,11 @@ L1="${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COS
 L1+="${RL_FMT}"
 echo -e "$L1"
 
-# ── LINE 2: Directory + branch + compact warning ──
+# ── LINE 2: Directory + branch + version + compact warning ──
+VER_CLEAN=$(echo "$CC_VER" | tr -d "'")
 L2="${C}${DIR_SHORT}${R}"
 [[ -n "$BRANCH" ]] && L2+=" ${D}·${R} ${G}${BRANCH}${R}"
+[[ -n "$VER_CLEAN" ]] && L2+=" ${D}· v${VER_CLEAN}${R}"
 L2+="${COMPACT_WARN}"
 echo -e "$L2"
 
