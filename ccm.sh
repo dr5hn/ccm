@@ -5153,40 +5153,25 @@ cmd_statusline() {
             # Create the statusline script
             cat > "$script_path" << 'STATUSLINE_EOF'
 #!/usr/bin/env bash
-# CCM Statusline — compact 2-line display for Claude Code
+# CCM Statusline — smart multi-line display for Claude Code
 
 input=$(cat)
 
-# ── Session data from Claude Code ──
-MODEL=$(echo "$input" | jq -r '.model.display_name // "Claude"' 2>/dev/null)
+# ── Colors ──
+R="\033[0m" C="\033[36m" D="\033[90m" G="\033[32m" Y="\033[33m" RED="\033[31m"
+
+# ── Session data from Claude Code stdin ──
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
 TOKENS=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0' 2>/dev/null)
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
+DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0' 2>/dev/null)
+CWD=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
 
-# ── CCM account data (direct file read, no ccm dependency) ──
-SEQ="$HOME/.claude-switch-backup/sequence.json"
-CONF="$HOME/.claude/.claude.json"
-[[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
+# Rate limits (Pro/Max only — null for API users)
+RL5_PCT=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
+RL5_RESET=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
 
-ALIAS="?" EMAIL_SHORT="?" HEALTH="?" TOTAL_ACCTS="?"
-if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
-    EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
-    if [[ -n "$EMAIL" ]]; then
-        EMAIL_SHORT="$EMAIL"
-        ACCT_DATA=$(jq -r --arg e "$EMAIL" '
-            .accounts | to_entries[] | select(.value.email == $e) |
-            "\(.value.alias // "")\t\(.value.healthStatus // "unknown")"
-        ' "$SEQ" 2>/dev/null)
-        if [[ -n "$ACCT_DATA" ]]; then
-            ALIAS=$(echo "$ACCT_DATA" | cut -f1)
-            HEALTH=$(echo "$ACCT_DATA" | cut -f2)
-            [[ -z "$ALIAS" ]] && ALIAS="$EMAIL_SHORT"
-        fi
-        TOTAL_ACCTS=$(jq '.accounts | length' "$SEQ" 2>/dev/null || echo "?")
-    fi
-fi
-
-# ── Context bar ──
+# ── Context bar (10 chars) ──
 PCT_NUM=${PCT:-0}
 FILLED=$((PCT_NUM / 10))
 EMPTY=$((10 - FILLED))
@@ -5194,10 +5179,9 @@ BAR=""
 for ((i=0; i<FILLED; i++)); do BAR+="▓"; done
 for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
 
-# Context color
-if [[ "$PCT_NUM" -ge 90 ]]; then BAR_C="\033[31m"
-elif [[ "$PCT_NUM" -ge 70 ]]; then BAR_C="\033[33m"
-else BAR_C="\033[32m"; fi
+if [[ "$PCT_NUM" -ge 90 ]]; then BAR_C="$RED"
+elif [[ "$PCT_NUM" -ge 70 ]]; then BAR_C="$Y"
+else BAR_C="$G"; fi
 
 # ── Format tokens (K/M) ──
 if [[ "$TOKENS" -ge 1000000 ]]; then
@@ -5209,19 +5193,91 @@ else
 fi
 
 # ── Format cost ──
-COST_FMT=$(awk "BEGIN{printf \"$%.2f\", $COST}" 2>/dev/null || echo "\$$COST")
+COST_FMT=$(awk "BEGIN{printf \"\$%.2f\", $COST}" 2>/dev/null || echo "\$$COST")
 
-# ── Health icon ──
-case "$HEALTH" in
-    healthy)  H_ICON="\033[32m●\033[0m" ;;
-    degraded) H_ICON="\033[33m●\033[0m" ;;
-    *)        H_ICON="\033[31m●\033[0m" ;;
-esac
+# ── Format duration ──
+DURATION_S=$((DURATION_MS / 1000))
+if [[ "$DURATION_S" -ge 3600 ]]; then
+    DUR_FMT="$((DURATION_S / 3600))h$((DURATION_S % 3600 / 60))m"
+elif [[ "$DURATION_S" -ge 60 ]]; then
+    DUR_FMT="$((DURATION_S / 60))m"
+else
+    DUR_FMT="${DURATION_S}s"
+fi
 
-# ── Output: 2 compact lines ──
-R="\033[0m" C="\033[36m" D="\033[90m"
-echo -e "${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT}"
-echo -e "${C}${ALIAS}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H_ICON}"
+# ── Format rate limit ──
+RL_FMT=""
+if [[ -n "$RL5_PCT" ]]; then
+    RL5_INT=$(echo "$RL5_PCT" | cut -d. -f1)
+    if [[ "$RL5_INT" -ge 80 ]]; then RL_C="$RED"
+    elif [[ "$RL5_INT" -ge 60 ]]; then RL_C="$Y"
+    else RL_C="$G"; fi
+
+    RESET_FMT=""
+    if [[ -n "$RL5_RESET" ]] && [[ "$RL5_RESET" != "null" ]]; then
+        case "$(uname)" in
+            Darwin) RESET_FMT=$(date -r "$RL5_RESET" +%H:%M 2>/dev/null) ;;
+            *)      RESET_FMT=$(date -d "@$RL5_RESET" +%H:%M 2>/dev/null) ;;
+        esac
+    fi
+    RL_FMT=" ${D}·${R} ${RL_C}5hr: ${RL5_INT}%${R}"
+    [[ -n "$RESET_FMT" ]] && RL_FMT+="${D} ↻${RESET_FMT}${R}"
+fi
+
+# ── Git branch ──
+BRANCH=""
+if [[ -n "$CWD" ]] && command -v git &>/dev/null; then
+    BRANCH=$(git -C "$CWD" branch --show-current 2>/dev/null)
+fi
+
+# ── Directory (short) ──
+DIR_SHORT=""
+if [[ -n "$CWD" ]]; then
+    DIR_SHORT="${CWD/#$HOME/~}"
+    # Truncate to last 30 chars
+    [[ ${#DIR_SHORT} -gt 30 ]] && DIR_SHORT="…${DIR_SHORT: -29}"
+fi
+
+# ── CCM account data (direct file read) ──
+SEQ="$HOME/.claude-switch-backup/sequence.json"
+CONF="$HOME/.claude/.claude.json"
+[[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
+
+ALIAS="" EMAIL_SHORT="" HEALTH="" TOTAL_ACCTS=0
+if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
+    EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
+    if [[ -n "$EMAIL" ]]; then
+        EMAIL_SHORT="$EMAIL"
+        ACCT_DATA=$(jq -r --arg e "$EMAIL" '
+            .accounts | to_entries[] | select(.value.email == $e) |
+            "\(.value.alias // "")\t\(.value.healthStatus // "unknown")"
+        ' "$SEQ" 2>/dev/null)
+        if [[ -n "$ACCT_DATA" ]]; then
+            ALIAS=$(echo "$ACCT_DATA" | cut -f1)
+            HEALTH=$(echo "$ACCT_DATA" | cut -f2)
+        fi
+        TOTAL_ACCTS=$(jq '.accounts | length' "$SEQ" 2>/dev/null || echo "0")
+    fi
+fi
+
+# ── LINE 1: Context + tokens + cost + rate limit ──
+echo -e "${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT} ${D}·${R} ${DUR_FMT}${RL_FMT}"
+
+# ── LINE 2: Directory + branch (always shown) ──
+L2="${C}${DIR_SHORT}${R}"
+[[ -n "$BRANCH" ]] && L2+=" ${D}·${R} ${G}${BRANCH}${R}"
+echo -e "$L2"
+
+# ── LINE 3: Account info (only if 2+ accounts managed) ──
+if [[ "$TOTAL_ACCTS" -ge 2 ]]; then
+    ACCT_LABEL="${ALIAS:-$EMAIL_SHORT}"
+    case "$HEALTH" in
+        healthy)  H="${G}●${R}" ;;
+        degraded) H="${Y}●${R}" ;;
+        *)        H="${RED}●${R}" ;;
+    esac
+    echo -e "${C}${ACCT_LABEL}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H}"
+fi
 STATUSLINE_EOF
 
             chmod +x "$script_path"
