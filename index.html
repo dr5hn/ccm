@@ -4,15 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CCM — Claude Code Manager</title>
-<meta name="description" content="The power-user toolkit for Claude Code. Manage multiple accounts, sessions, environments, and usage — all from the terminal. Open source CLI for macOS, Linux, WSL.">
-<meta name="keywords" content="Claude Code, account manager, CLI tool, multi-account, session management, environment snapshots, token optimization, developer tools">
+<meta name="description" content="The power-user toolkit for Claude Code. Manage multiple accounts, bind projects, search sessions, track token usage, clean disk bloat — all from the terminal. Open source CLI for macOS, Linux, WSL.">
+<meta name="keywords" content="Claude Code, account manager, CLI tool, multi-account, session management, token usage, environment snapshots, token optimization, developer tools, project bindings">
 <meta name="author" content="Darshan Gada">
 <link rel="canonical" href="https://github.com/dr5hn/ccm">
 
 <!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="CCM — Claude Code Manager">
-<meta property="og:description" content="Manage multiple Claude Code accounts from one terminal. Switch accounts, manage sessions, snapshot environments, optimize tokens — all from the CLI.">
+<meta property="og:description" content="Manage multiple Claude Code accounts from one terminal. Switch accounts, bind projects, search sessions, track token usage, clean disk bloat — all from the CLI.">
 <meta property="og:image" content="https://raw.githubusercontent.com/dr5hn/ccm/main/og-image.svg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -897,7 +897,7 @@ body {
  ╚═════╝ ╚═════╝╚═╝     ╚═╝</pre>
       <div class="hero-badge">★ Open Source · MIT License</div>
       <h1 class="hero-headline gradient-text">Manage multiple Claude Code accounts from one terminal</h1>
-      <p class="hero-sub">Switch accounts, manage sessions, snapshot environments, and track usage — all without leaving your workflow.</p>
+      <p class="hero-sub">Switch accounts, bind projects, search sessions, track token usage, and clean up disk bloat — all without leaving your workflow.</p>
       <div class="hero-ctas">
         <a href="#install" class="btn-primary">Get Started</a>
         <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener" class="btn-secondary">View on GitHub</a>
@@ -956,9 +956,9 @@ body {
     <div class="section-label" style="text-align:center">See It In Action</div>
     <div class="demo-tabs">
       <button class="demo-tab active" data-demo="accounts">accounts</button>
+      <button class="demo-tab" data-demo="bindings">bindings</button>
       <button class="demo-tab" data-demo="sessions">sessions</button>
-      <button class="demo-tab" data-demo="env">env</button>
-      <button class="demo-tab" data-demo="usage">usage</button>
+      <button class="demo-tab" data-demo="tokens">token usage</button>
       <button class="demo-tab" data-demo="doctor">doctor</button>
       <button class="demo-tab" data-demo="optimize">optimize</button>
     </div>
@@ -981,37 +981,43 @@ body {
         <div class="feature-icon">⟩_</div>
         <div class="feature-name">Account Switching</div>
         <div class="feature-cmd">ccm switch &lt;id&gt;</div>
-        <div class="feature-desc">Rotate between accounts in one command. Aliases, history, undo, import/export.</div>
+        <div class="feature-desc">Rotate between accounts in one command. Aliases, history, undo, reorder, import/export.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊞</div>
-        <div class="feature-name">Session Management</div>
-        <div class="feature-cmd">ccm session list</div>
-        <div class="feature-desc">List, inspect, relocate, and clean orphaned sessions eating your disk.</div>
+        <div class="feature-name">Project Bindings</div>
+        <div class="feature-cmd">ccm bind . work</div>
+        <div class="feature-desc">Bind project directories to accounts. Running ccm switch in a bound directory auto-switches to the right account.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊡</div>
-        <div class="feature-name">Environment Snapshots</div>
-        <div class="feature-cmd">ccm env snapshot</div>
-        <div class="feature-desc">Save and restore your Claude Code config. Audit MCP servers for token waste.</div>
+        <div class="feature-name">Session Management</div>
+        <div class="feature-cmd">ccm session search</div>
+        <div class="feature-desc">List, inspect, relocate, search, and clean sessions. Full-text search across all conversation history.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊟</div>
-        <div class="feature-name">Usage Stats</div>
-        <div class="feature-cmd">ccm usage summary</div>
-        <div class="feature-desc">See your Claude Code footprint. Disk usage, session counts, project breakdown.</div>
+        <div class="feature-name">Usage Analytics</div>
+        <div class="feature-cmd">ccm usage history</div>
+        <div class="feature-desc">Token usage breakdown by project and day. Disk usage, session counts, project ranking.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊕</div>
         <div class="feature-name">Health &amp; Maintenance</div>
         <div class="feature-cmd">ccm doctor</div>
-        <div class="feature-desc">Scan for stale locks, log bloat, cache issues. Auto-fix with --fix. Targeted cleanup for logs, telemetry, cache.</div>
+        <div class="feature-desc">13 health checks: disk size, tmp bloat, orphaned processes, stale locks, hook config. Auto-fix with --fix. Clean tmp files, kill leaked processes.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊘</div>
         <div class="feature-name">Token Optimization</div>
         <div class="feature-cmd">ccm optimize</div>
         <div class="feature-desc">Analyze context window footprint. Flag unused plugins and oversized CLAUDE.md files inflating token usage.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊗</div>
+        <div class="feature-name">Environment Snapshots</div>
+        <div class="feature-cmd">ccm env snapshot</div>
+        <div class="feature-desc">Save and restore your Claude Code config. Audit MCP servers for token waste.</div>
       </div>
     </div>
   </div>
@@ -1074,7 +1080,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Account Management</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">12 commands</span>
+          <span class="cmd-count">16 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1082,11 +1088,15 @@ body {
         <table class="cmd-table">
           <tr><td>ccm add</td><td>Add current account</td></tr>
           <tr><td>ccm remove &lt;id&gt;</td><td>Remove account by number, email, or alias</td></tr>
-          <tr><td>ccm switch [id]</td><td>Switch account (next or specific)</td></tr>
+          <tr><td>ccm switch [id]</td><td>Switch account (next, specific, or project-bound)</td></tr>
           <tr><td>ccm undo</td><td>Revert last switch</td></tr>
           <tr><td>ccm list</td><td>List managed accounts</td></tr>
           <tr><td>ccm status</td><td>Active account details</td></tr>
           <tr><td>ccm alias &lt;id&gt; &lt;name&gt;</td><td>Set account alias</td></tr>
+          <tr><td>ccm reorder &lt;from&gt; &lt;to&gt;</td><td>Reorder account positions</td></tr>
+          <tr><td>ccm bind [path] &lt;account&gt;</td><td>Bind project directory to an account</td></tr>
+          <tr><td>ccm unbind [path]</td><td>Remove project binding</td></tr>
+          <tr><td>ccm bind list</td><td>Show all project bindings</td></tr>
           <tr><td>ccm verify [id]</td><td>Verify backup integrity</td></tr>
           <tr><td>ccm history</td><td>Show switch history</td></tr>
           <tr><td>ccm export &lt;path&gt;</td><td>Export accounts to archive</td></tr>
@@ -1100,7 +1110,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Session Management</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">4 commands</span>
+          <span class="cmd-count">5 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1108,6 +1118,7 @@ body {
         <table class="cmd-table">
           <tr><td>ccm session list</td><td>List all project sessions</td></tr>
           <tr><td>ccm session info &lt;path&gt;</td><td>Session details for a project</td></tr>
+          <tr><td>ccm session search &lt;query&gt; [--limit N]</td><td>Full-text search across all sessions</td></tr>
           <tr><td>ccm session relocate &lt;old&gt; &lt;new&gt;</td><td>Move sessions after project relocation</td></tr>
           <tr><td>ccm session clean [--dry-run]</td><td>Remove orphaned sessions</td></tr>
         </table>
@@ -1137,18 +1148,20 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Health &amp; Maintenance</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">8 commands</span>
+          <span class="cmd-count">10 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
       <div class="cmd-group-body">
         <table class="cmd-table">
-          <tr><td>ccm doctor</td><td>Scan for health issues</td></tr>
+          <tr><td>ccm doctor</td><td>13 health checks (disk, tmp, processes, hooks, locks, cache)</td></tr>
           <tr><td>ccm doctor --fix</td><td>Auto-fix safe issues</td></tr>
           <tr><td>ccm clean debug [--days N]</td><td>Clean debug logs (default: 30 days)</td></tr>
           <tr><td>ccm clean telemetry</td><td>Remove telemetry data</td></tr>
           <tr><td>ccm clean todos [--days N]</td><td>Remove old todo files</td></tr>
           <tr><td>ccm clean history [--keep N]</td><td>Trim history (default: keep 1000)</td></tr>
+          <tr><td>ccm clean tmp [--days N]</td><td>Clean orphaned tmp output files (default: 1 day)</td></tr>
+          <tr><td>ccm clean processes</td><td>Kill orphaned Claude subagent processes</td></tr>
           <tr><td>ccm clean cache</td><td>Clean plugin cache</td></tr>
           <tr><td>ccm clean all [--dry-run]</td><td>Clean everything safe</td></tr>
         </table>
@@ -1174,7 +1187,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Usage Stats</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">2 commands</span>
+          <span class="cmd-count">3 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1182,6 +1195,7 @@ body {
         <table class="cmd-table">
           <tr><td>ccm usage summary</td><td>Claude Code footprint overview</td></tr>
           <tr><td>ccm usage top [--count N]</td><td>Top projects by disk usage</td></tr>
+          <tr><td>ccm usage history [--days N] [--project &lt;path&gt;]</td><td>Token usage by project and day</td></tr>
         </table>
       </div>
     </div>
@@ -1226,79 +1240,87 @@ var demos = {
     { type: 'success', text: '✓ Switched: personal → work (darshan@company.com)' },
     { type: 'muted', text: '  Please restart Claude Code to use the new authentication.' }
   ],
+  bindings: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm bind . work' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ Bound ~/projects/my-saas-app → Account-2 (darshan@company.com)' },
+    { type: 'muted',  text: "  Running 'ccm switch' in this directory will auto-switch to this account." },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm bind list' },
+    { type: 'blank' },
+    { type: 'output', text: 'Project                                        Account' },
+    { type: 'muted',  text: '-------                                        -------' },
+    { type: 'output', text: '~/projects/my-saas-app                         2: darshan@company.com [work]' },
+    { type: 'output', text: '~/projects/agency-client                       3: client@agency.io [client]' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm switch' },
+    { type: 'blank' },
+    { type: 'active', text: 'i Project binding: switching to Account-2 (darshan@company.com)' },
+    { type: 'success', text: '✓ Switched: personal → work' }
+  ],
   sessions: [
     { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm session list' },
+    { type: 'cmd', text: 'ccm session search "API endpoint"' },
     { type: 'blank' },
-    { type: 'output', text: 'PROJECT                            FILES    SIZE  LAST ACTIVE     STATUS' },
-    { type: 'muted',  text: '────────────────────────────────────────────────────────────────────────' },
-    { type: 'active', text: '~/projects/my-saas-app                23  80 MB  just now         active' },
-    { type: 'output', text: '~/projects/api-gateway                11  32 MB  5 hours ago      active' },
-    { type: 'output', text: '~/experiments/test-project              2   1 MB  3 weeks ago      active' },
-    { type: 'warn',   text: '~/old/deleted-project                   5  18 MB  2 months ago  orphaned' },
+    { type: 'output', text: 'Session Search: "API endpoint"' },
     { type: 'blank' },
-    { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm session clean --dry-run' },
+    { type: 'active', text: '  1. ~/projects/my-saas-app' },
+    { type: 'muted',  text: '     2026-03-28 14:22:05' },
+    { type: 'output', text: '     Added REST API endpoint for user authentication with JWT...' },
     { type: 'blank' },
-    { type: 'warn', text: '⚠ Found 1 orphaned session (18 MB)' },
-    { type: 'muted', text: '  ~/old/deleted-project — project not found on disk' }
+    { type: 'active', text: '  2. ~/projects/api-gateway' },
+    { type: 'muted',  text: '     2026-03-27 09:15:33' },
+    { type: 'output', text: '     Refactored API endpoint routing to support versioned paths...' },
+    { type: 'blank' },
+    { type: 'output', text: 'Found 2 result(s)' }
   ],
-  env: [
+  tokens: [
     { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm env audit' },
+    { type: 'cmd', text: 'ccm usage history --days 7' },
     { type: 'blank' },
-    { type: 'output', text: 'Token Efficiency Audit' },
-    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━' },
+    { type: 'output', text: 'Token Usage History (last 7 days)' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' },
     { type: 'blank' },
-    { type: 'warn',   text: '⚠ playwright (MCP) → CLI alternative available' },
-    { type: 'muted',  text: '  CLI: npx playwright test, npx playwright codegen' },
-    { type: 'muted',  text: '  Savings: ~2000 tokens/request' },
+    { type: 'output', text: 'Per-Project Breakdown:' },
     { type: 'blank' },
-    { type: 'success', text: '✓ context7 (MCP) → Keep (no CLI equivalent)' },
-    { type: 'success', text: '✓ figma (MCP) → Keep (no CLI equivalent)' },
+    { type: 'muted',  text: '  Project                                       Input       Output        Total' },
+    { type: 'muted',  text: '  -------                                       -----       ------        -----' },
+    { type: 'active', text: '  ~/projects/my-saas-app                   12,841,022      189,445   13,030,467' },
+    { type: 'output', text: '  ~/projects/api-gateway                    8,234,811      112,334    8,347,145' },
+    { type: 'output', text: '  ~/projects/agency-client                  3,445,290       54,221    3,499,511' },
     { type: 'blank' },
-    { type: 'output', text: '1 MCP replaceable, ~2000 tokens saved per request' }
-  ],
-  usage: [
-    { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm usage summary' },
+    { type: 'output', text: 'Per-Day Breakdown:' },
     { type: 'blank' },
-    { type: 'output', text: 'Claude Code Usage Summary' },
-    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━━━━━━' },
+    { type: 'muted',  text: '  Date              Input       Output        Total' },
+    { type: 'muted',  text: '  ----              -----       ------        -----' },
+    { type: 'output', text: '  2026-03-28    5,102,445       72,891    5,175,336' },
+    { type: 'output', text: '  2026-03-27    8,234,111      124,556    8,358,667' },
+    { type: 'output', text: '  2026-03-26   11,184,567      158,553   11,343,120' },
     { type: 'blank' },
-    { type: 'output', text: '  Projects:        55 (43 active, 12 orphaned)' },
-    { type: 'output', text: '  Sessions:       146 total (51 this week)' },
-    { type: 'output', text: '  Memory files:    21' },
-    { type: 'active', text: '  Disk usage:     452 MB' },
-    { type: 'output', text: '  Accounts:         3 managed' },
-    { type: 'blank' },
-    { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm usage top --count 3' },
-    { type: 'blank' },
-    { type: 'output', text: '  1  ~/projects/my-saas-app         23  80 MB  just now' },
-    { type: 'output', text: '  2  ~/projects/csc-app              11  64 MB  7 hours ago' },
-    { type: 'output', text: '  3  ~/projects/teamwork-cli         11  32 MB  5 hours ago' }
+    { type: 'output', text: 'Grand total:          24,877,123' }
   ],
   doctor: [
     { type: 'prompt', text: '$ ' },
     { type: 'cmd', text: 'ccm doctor' },
     { type: 'blank' },
-    { type: 'output', text: 'Health Check Report' },
-    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━' },
+    { type: 'output', text: 'CCM Doctor — Health Check' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━━━━━━━━' },
     { type: 'blank' },
-    { type: 'success', text: '✓ Auth files intact' },
-    { type: 'success', text: '✓ No stale lock files' },
-    { type: 'warn',   text: '⚠ Debug logs: 248 MB (124 files older than 30 days)' },
-    { type: 'warn',   text: '⚠ Plugin cache: 156 MB (3 unused plugins)' },
-    { type: 'success', text: '✓ Session registry consistent' },
+    { type: 'success', text: '✓ Lock files               No stale locks found' },
+    { type: 'warn',   text: '⚠ Debug logs               62 MB (87 files older than 30 days)' },
+    { type: 'warn',   text: '⚠ Plugin cache             321 MB (consider cleanup)' },
+    { type: 'warn',   text: '⚠ Telemetry                33 MB (88 files)' },
+    { type: 'success', text: '✓ Orphaned sessions        No orphaned sessions found' },
+    { type: 'success', text: '✓ Total ~/.claude size     914 MB' },
+    { type: 'warn',   text: '⚠ Tmp output files         2.3 GB (47 files older than 1 day)' },
+    { type: 'success', text: '✓ Orphaned processes       None detected' },
+    { type: 'success', text: '✓ Hook async config        All hooks properly configured' },
     { type: 'blank' },
-    { type: 'output', text: '2 issues found. Run ccm doctor --fix to resolve.' },
-    { type: 'blank' },
-    { type: 'prompt', text: '$ ' },
-    { type: 'cmd', text: 'ccm doctor --fix' },
-    { type: 'blank' },
-    { type: 'success', text: '✓ Cleaned 124 old debug logs (freed 248 MB)' },
-    { type: 'success', text: '✓ Purged 3 unused plugin caches (freed 156 MB)' }
+    { type: 'output', text: '4 issues found, ~2.7 GB recoverable' },
+    { type: 'muted',  text: "Run 'ccm doctor --fix' to auto-fix safe issues." }
   ],
   optimize: [
     { type: 'prompt', text: '$ ' },
