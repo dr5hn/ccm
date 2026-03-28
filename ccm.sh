@@ -5162,7 +5162,13 @@ R="\033[0m" C="\033[36m" D="\033[90m" G="\033[32m" Y="\033[33m" RED="\033[31m"
 
 # ── Session data from Claude Code stdin ──
 PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
-TOKENS=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0' 2>/dev/null)
+# Total tokens = input + cache creation + cache read (matches Claude Code's RHS display)
+TOKENS=$(echo "$input" | jq -r '
+    (.context_window.current_usage.input_tokens // 0) +
+    (.context_window.current_usage.cache_creation_input_tokens // 0) +
+    (.context_window.current_usage.cache_read_input_tokens // 0)
+' 2>/dev/null)
+[[ -z "$TOKENS" || "$TOKENS" == "null" ]] && TOKENS=0
 COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
 DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0' 2>/dev/null)
 CWD=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
