@@ -2993,6 +2993,54 @@ show_help() {
             echo "  ccm usage history --days 30"
             echo "  ccm usage history --project ~/my-app"
             ;;
+        launch)
+            echo -e "${COLOR_BOLD}ccm launch — Claude Code Launcher${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm launch [mode] [claude args...]"
+            echo ""
+            echo -e "${COLOR_BOLD}Modes:${COLOR_RESET}"
+            echo "  auto                     Auto-accept most actions"
+            echo "  yolo                     Skip ALL permission checks (confirmation required)"
+            echo "  plan                     Read-only mode (no writes)"
+            echo "  safe                     Ask for everything (default Claude behavior)"
+            echo ""
+            echo "Automatically resets terminal state on exit (fixes broken Ctrl-C in tmux)."
+            echo "Any extra arguments are passed through to claude."
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm launch               # normal launch with terminal reset"
+            echo "  ccm launch auto          # auto mode"
+            echo "  ccm launch yolo          # dangerous mode (asks for confirmation)"
+            echo "  ccm launch plan          # read-only mode"
+            echo "  ccm launch auto -c       # auto mode + continue last session"
+            ;;
+        init)
+            echo -e "${COLOR_BOLD}ccm init — Project Setup${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm init [--force]"
+            echo ""
+            echo "Auto-generates .claudeignore based on detected project type."
+            echo "Detects: Node, Python, Go, Rust, Java, Ruby, PHP, .NET, Dart, Swift."
+            echo ""
+            echo "Options:"
+            echo "  --force     Overwrite existing .claudeignore"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm init                 # generate .claudeignore"
+            echo "  ccm init --force         # regenerate from scratch"
+            ;;
+        permissions)
+            echo -e "${COLOR_BOLD}ccm permissions — Permission Rules Management${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm permissions <subcommand>"
+            echo ""
+            echo -e "${COLOR_BOLD}Subcommands:${COLOR_RESET}"
+            echo "  audit [--fix]            Scan for duplicates, contradictions, and bloat"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm permissions audit          # report issues"
+            echo "  ccm permissions audit --fix    # auto-remove duplicates"
+            ;;
         *)
             echo -e "${COLOR_GREEN}"
             echo ' ██████╗ ██████╗███╗   ███╗'
@@ -3036,6 +3084,11 @@ show_help() {
             echo "  doctor [--fix]                         Diagnose and fix Claude Code health issues"
             echo "  clean <target> [--dry-run]             Clean up cache, logs, telemetry, tmp, processes"
             echo "  optimize                               Analyze and optimize token usage"
+            echo "  permissions <subcommand>               Audit and fix permission rules"
+            echo ""
+            echo -e "${COLOR_BOLD}Launcher:${COLOR_RESET}"
+            echo "  launch [auto|yolo|plan|safe]           Launch Claude Code with preset mode + terminal fix"
+            echo "  init [--force]                         Generate .claudeignore for this project"
             echo ""
             echo -e "${COLOR_BOLD}Other:${COLOR_RESET}"
             echo "  interactive                        Launch interactive menu mode"
@@ -3047,16 +3100,15 @@ show_help() {
             echo "  ccm add"
             echo "  ccm alias 1 work"
             echo "  ccm switch work"
-            echo "  ccm switch user@example.com"
-            echo "  ccm list"
-            echo "  ccm verify"
-            echo "  ccm reorder 3 1"
+            echo "  ccm launch auto"
+            echo "  ccm launch yolo"
+            echo "  ccm init"
             echo "  ccm bind . work"
-            echo "  ccm bind list"
+            echo "  ccm permissions audit"
             echo "  ccm usage history --days 30"
             echo "  ccm session search 'error handling'"
             echo "  ccm clean tmp"
-            echo "  ccm help session"
+            echo "  ccm help launch"
             ;;
     esac
 }
@@ -4965,6 +5017,405 @@ cmd_optimize() {
     fi
 }
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Launch Module — Claude Code Wrapper with Mode Aliases
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Launches Claude Code with preset permission modes and terminal reset on exit
+# Parameters: [mode] [extra args...] — mode: auto|yolo|plan|safe (default: normal launch)
+# Returns: Exit code from claude process
+# Usage: cmd_launch | cmd_launch auto | cmd_launch yolo | cmd_launch plan
+cmd_launch() {
+    local mode="${1:-}"
+    local claude_bin
+    claude_bin=$(command -v claude 2>/dev/null)
+    if [[ -z "$claude_bin" ]]; then
+        log_error "Claude Code not found. Install it first: https://code.claude.com"
+        exit 1
+    fi
+
+    local claude_args=()
+
+    case "$mode" in
+        auto)
+            log_info "Launching Claude Code in ${COLOR_GREEN}auto mode${COLOR_RESET}"
+            claude_args+=("--permission-mode" "auto")
+            shift
+            ;;
+        yolo|dangerous)
+            log_warning "Launching Claude Code in ${COLOR_RED}dangerous mode${COLOR_RESET} (all permissions bypassed)"
+            echo -n "Are you sure? (y/N): "
+            read -r confirm
+            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+                log_info "Launch cancelled."
+                return 0
+            fi
+            claude_args+=("--dangerously-skip-permissions")
+            shift
+            ;;
+        plan)
+            log_info "Launching Claude Code in ${COLOR_CYAN}plan mode${COLOR_RESET} (read-only)"
+            claude_args+=("--permission-mode" "plan")
+            shift
+            ;;
+        safe)
+            log_info "Launching Claude Code in ${COLOR_GREEN}safe mode${COLOR_RESET} (ask for everything)"
+            claude_args+=("--permission-mode" "default")
+            shift
+            ;;
+        "")
+            # Normal launch, no special mode
+            ;;
+        *)
+            # Not a mode — pass everything through as claude args
+            ;;
+    esac
+
+    # Append any remaining arguments
+    claude_args+=("$@")
+
+    # Run claude and ensure terminal reset on exit
+    local exit_code=0
+    "$claude_bin" "${claude_args[@]}" || exit_code=$?
+
+    # Reset terminal state (fixes broken Ctrl-C/Ctrl-D after exit in tmux/kitty/ghostty)
+    printf '\033[?1003l\033[?1006l' 2>/dev/null  # disable mouse tracking modes
+    printf '\033[?1036l' 2>/dev/null              # disable metaSendsEscape
+    stty sane 2>/dev/null                          # restore sane terminal settings
+
+    return $exit_code
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Init Module — Project Setup
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Auto-generates .claudeignore based on detected project type
+# Parameters: [--force] — overwrite existing .claudeignore
+# Returns: 0 on success, 1 on failure
+# Usage: cmd_init | cmd_init --force
+cmd_init() {
+    local force=0
+    if [[ "${1:-}" == "--force" ]]; then
+        force=1
+    fi
+
+    local target=".claudeignore"
+
+    if [[ -f "$target" ]] && [[ "$force" -eq 0 ]]; then
+        log_info ".claudeignore already exists. Use --force to overwrite."
+        return 0
+    fi
+
+    # Detect project type(s) from manifest files
+    local types=()
+    [[ -f "package.json" ]]      && types+=("node")
+    [[ -f "pyproject.toml" || -f "setup.py" || -f "requirements.txt" || -f "Pipfile" ]] && types+=("python")
+    [[ -f "go.mod" ]]            && types+=("go")
+    [[ -f "Cargo.toml" ]]        && types+=("rust")
+    [[ -f "build.gradle" || -f "pom.xml" ]]   && types+=("java")
+    [[ -f "Gemfile" ]]           && types+=("ruby")
+    [[ -f "composer.json" ]]     && types+=("php")
+    [[ -f "*.sln" || -f "*.csproj" ]] 2>/dev/null && types+=("dotnet")
+    [[ -f "pubspec.yaml" ]]      && types+=("dart")
+    [[ -f "Package.swift" ]]     && types+=("swift")
+
+    if [[ ${#types[@]} -eq 0 ]]; then
+        types+=("generic")
+    fi
+
+    log_info "Detected project type(s): ${types[*]}"
+
+    # Build .claudeignore content
+    local content=""
+
+    # Common patterns (always included)
+    content+="# Generated by ccm init
+# Common
+.git/
+.DS_Store
+*.log
+*.tmp
+*.swp
+*~
+"
+
+    for ptype in "${types[@]}"; do
+        case "$ptype" in
+            node)
+                content+="
+# Node.js
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+.output/
+coverage/
+.nyc_output/
+*.min.js
+*.min.css
+*.bundle.js
+*.chunk.js
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.pnp.*
+"
+                ;;
+            python)
+                content+="
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.env/
+*.egg-info/
+dist/
+build/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+"
+                ;;
+            go)
+                content+="
+# Go
+vendor/
+*.exe
+*.test
+*.out
+"
+                ;;
+            rust)
+                content+="
+# Rust
+target/
+Cargo.lock
+"
+                ;;
+            java)
+                content+="
+# Java
+target/
+build/
+.gradle/
+*.class
+*.jar
+*.war
+*.ear
+.idea/
+*.iml
+"
+                ;;
+            ruby)
+                content+="
+# Ruby
+vendor/bundle/
+.bundle/
+coverage/
+tmp/
+log/
+"
+                ;;
+            php)
+                content+="
+# PHP
+vendor/
+node_modules/
+storage/framework/
+bootstrap/cache/
+.phpunit.result.cache
+composer.lock
+"
+                ;;
+            dotnet)
+                content+="
+# .NET
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+packages/
+"
+                ;;
+            dart)
+                content+="
+# Dart/Flutter
+.dart_tool/
+build/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+"
+                ;;
+            swift)
+                content+="
+# Swift
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+Packages/
+"
+                ;;
+            generic)
+                content+="
+# Build artifacts
+dist/
+build/
+out/
+"
+                ;;
+        esac
+    done
+
+    printf '%s' "$content" > "$target"
+    log_success "Generated $target for: ${types[*]}"
+    echo ""
+    echo "  Patterns added: $(grep -c '^[^#]' "$target" | tr -d ' ') rules"
+    echo "  Edit $target to customize further."
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Permissions Module — Permission Rules Audit
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Audits permission rules in settings files for duplicates, dead rules, and bloat
+# Parameters: [--fix] — auto-remove duplicate and dead rules
+# Returns: 0 on success
+# Usage: cmd_permissions audit | cmd_permissions audit --fix
+cmd_permissions() {
+    case "${1:-}" in
+        audit)  shift; permissions_audit "$@" ;;
+        "")     show_help permissions ;;
+        *)      log_error "Unknown permissions command '$1'"; show_help permissions; exit 1 ;;
+    esac
+}
+
+# Purpose: Scans settings.json and settings.local.json for permission rule issues
+# Parameters: [--fix] — auto-deduplicate and clean
+# Returns: 0 on success
+# Usage: permissions_audit | permissions_audit --fix
+permissions_audit() {
+    local fix_mode=0
+    if [[ "${1:-}" == "--fix" ]]; then
+        fix_mode=1
+    fi
+
+    echo -e "${COLOR_BOLD}Permission Rules Audit${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}"
+    echo ""
+
+    local settings_file="$HOME/.claude/settings.json"
+    local local_file="$HOME/.claude/settings.local.json"
+    local issues=0
+
+    # Audit global settings
+    for file in "$settings_file" "$local_file"; do
+        [[ -f "$file" ]] || continue
+
+        local filename
+        filename=$(basename "$file")
+        echo -e "${COLOR_BOLD}$filename:${COLOR_RESET}"
+
+        # Count rules per category
+        local allow_count deny_count ask_count
+        allow_count=$(jq '[.permissions.allow // [] | .[] ] | length' "$file" 2>/dev/null || echo "0")
+        deny_count=$(jq '[.permissions.deny // [] | .[] ] | length' "$file" 2>/dev/null || echo "0")
+        ask_count=$(jq '[.permissions.ask // [] | .[] ] | length' "$file" 2>/dev/null || echo "0")
+        local total=$((allow_count + deny_count + ask_count))
+
+        echo "  Rules: $allow_count allow, $deny_count deny, $ask_count ask ($total total)"
+
+        # Check for duplicates
+        local allow_dupes deny_dupes
+        allow_dupes=$(jq '[.permissions.allow // [] | .[] ] | group_by(.) | map(select(length > 1) | {rule: .[0], count: length}) | length' "$file" 2>/dev/null || echo "0")
+        deny_dupes=$(jq '[.permissions.deny // [] | .[] ] | group_by(.) | map(select(length > 1) | {rule: .[0], count: length}) | length' "$file" 2>/dev/null || echo "0")
+
+        if [[ "$allow_dupes" -gt 0 ]] || [[ "$deny_dupes" -gt 0 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Duplicates: $allow_dupes in allow, $deny_dupes in deny"
+            issues=$((issues + allow_dupes + deny_dupes))
+
+            # Show duplicate rules
+            if [[ "$allow_dupes" -gt 0 ]]; then
+                jq -r '[.permissions.allow // [] | .[] ] | group_by(.) | map(select(length > 1)) | .[] | "     \(.[0]) (x\(length))"' "$file" 2>/dev/null
+            fi
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} No duplicates"
+        fi
+
+        # Check for contradictions (same rule in both allow and deny)
+        local contradictions
+        contradictions=$(jq '[(.permissions.allow // []) as $a | (.permissions.deny // []) as $d | $a[] as $rule | select($d | index($rule)) | $rule] | unique | length' "$file" 2>/dev/null || echo "0")
+        if [[ "$contradictions" -gt 0 ]]; then
+            echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} Contradictions: $contradictions rule(s) in both allow AND deny"
+            jq -r '[(.permissions.allow // []) as $a | (.permissions.deny // []) as $d | $a[] as $rule | select($d | index($rule)) | $rule] | unique[] | "     \(.)"' "$file" 2>/dev/null
+            issues=$((issues + contradictions))
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} No contradictions"
+        fi
+
+        # Check for verbatim strings that could be wildcards
+        local verbatim_count
+        verbatim_count=$(jq '[.permissions.allow // [] | .[] | select(test("^Bash\\(") and (test("[*:]") | not))] | length' "$file" 2>/dev/null || echo "0")
+        if [[ "$verbatim_count" -gt 0 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Verbatim rules: $verbatim_count Bash rules without wildcards (from 'Always Allow')"
+            issues=$((issues + 1))
+
+            # Show top offenders
+            jq -r '[.permissions.allow // [] | .[] | select(test("^Bash\\(") and (test("[*:]") | not))] | .[0:5][] | "     \(.)"' "$file" 2>/dev/null
+            local remaining=$((verbatim_count - 5))
+            [[ "$remaining" -gt 0 ]] && echo "     ... and $remaining more"
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} No verbatim Bash rules"
+        fi
+
+        # Warn on high rule count
+        if [[ "$total" -gt 100 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} High rule count ($total) — consider consolidating with wildcards"
+            issues=$((issues + 1))
+        elif [[ "$total" -gt 50 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} $total rules — approaching bloat threshold"
+        fi
+
+        # Fix mode: remove duplicates
+        if [[ "$fix_mode" -eq 1 ]] && [[ "$allow_dupes" -gt 0 || "$deny_dupes" -gt 0 ]]; then
+            local fixed
+            fixed=$(jq '
+                .permissions.allow = ([.permissions.allow // [] | .[] ] | unique) |
+                .permissions.deny = ([.permissions.deny // [] | .[] ] | unique) |
+                .permissions.ask = ([.permissions.ask // [] | .[] ] | unique)
+            ' "$file")
+            write_json "$file" "$fixed"
+
+            local new_allow new_deny
+            new_allow=$(echo "$fixed" | jq '[.permissions.allow // [] | .[]] | length')
+            new_deny=$(echo "$fixed" | jq '[.permissions.deny // [] | .[]] | length')
+            local removed=$(( (allow_count + deny_count) - (new_allow + new_deny) ))
+            log_step "  Removed $removed duplicate rule(s)"
+        fi
+
+        echo ""
+    done
+
+    # Summary
+    if [[ "$issues" -eq 0 ]]; then
+        log_success "Permission rules look clean."
+    else
+        echo -e "${COLOR_BOLD}Summary:${COLOR_RESET} $issues issue(s) found"
+        if [[ "$fix_mode" -eq 0 ]]; then
+            echo "Run 'ccm permissions audit --fix' to auto-fix duplicates."
+        fi
+    fi
+}
+
 # Main script logic
 # Purpose: Entry point — parses global flags, initializes colors, dispatches subcommands
 # Parameters: All CLI arguments
@@ -5011,6 +5462,9 @@ main() {
         doctor)         shift; cmd_doctor "$@" ;;
         clean)          shift; cmd_clean "$@" ;;
         optimize)       cmd_optimize ;;
+        launch)         shift; cmd_launch "$@" ;;
+        init)           shift; cmd_init "$@" ;;
+        permissions)    shift; cmd_permissions "$@" ;;
         help)           shift; show_help "$@" ;;
         version)        show_version ;;
         --help)         show_help ;;
