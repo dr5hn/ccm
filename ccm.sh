@@ -1369,6 +1369,26 @@ cmd_list() {
             isActive: (if "\($num)" == $active then "true" else "false" end)
         }
     ' "$SEQUENCE_FILE")
+
+    # Show project bindings if any exist
+    local bindings
+    bindings=$(jq -r '.bindings // {} | to_entries[] | "\(.key)|\(.value)"' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -n "$bindings" ]]; then
+        echo ""
+        echo -e "${COLOR_BOLD}Bindings:${COLOR_RESET}"
+        while IFS='|' read -r path account_num; do
+            [[ -z "$path" ]] && continue
+            local display_path
+            display_path=$(truncate_path "$path")
+            local email
+            email=$(jq -r --arg n "$account_num" '.accounts[$n].email // "unknown"' "$SEQUENCE_FILE")
+            local alias_name
+            alias_name=$(jq -r --arg n "$account_num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE")
+            local label="$account_num"
+            [[ -n "$alias_name" ]] && label="$alias_name"
+            echo -e "  ${display_path} ${COLOR_CYAN}→${COLOR_RESET} ${label}"
+        done <<< "$bindings"
+    fi
 }
 
 # Switch to next account
