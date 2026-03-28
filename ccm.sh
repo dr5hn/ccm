@@ -5304,7 +5304,6 @@ fi
 
 # ── LINE 1: Context + tokens + cost + duration + API + burn rate + rate limits ──
 L1="${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT} ${D}·${R} ${DUR_FMT}"
-[[ -n "$API_FMT" ]] && L1+=" ${D}(api ${API_FMT})${R}"
 [[ -n "$BURN_FMT" ]] && L1+=" ${D}·${R} ${BURN_FMT}"
 L1+="${RL_FMT}"
 echo -e "$L1"
