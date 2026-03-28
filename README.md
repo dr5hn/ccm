@@ -32,6 +32,12 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 - **Session relocation** — move sessions when a project folder is relocated
 - **Session cleanup** — remove orphaned sessions for projects that no longer exist
 
+### Statusline
+- **Smart status bar** — shows context %, tokens, session cost, duration, burn rate, rate limits, directory, branch, and version at the bottom of Claude Code
+- **Adaptive display** — 2 lines for single-account, 3 lines for multi-account. Rate limits only for Pro/Max users
+- **Color-coded warnings** — context bar and rate limits change color as you approach limits. Compact warning at 80%+
+- **Standalone install** — share with your team without CCM: `curl -fsSL .../statusline.sh | bash`
+
 ### Launcher
 - **Launch modes** — `ccm launch auto|yolo|plan|safe` for preset permission modes
 - **Terminal reset** — automatically fixes broken Ctrl-C/Ctrl-D after Claude Code exit in tmux
@@ -179,6 +185,19 @@ ccm launch yolo                        # Skip ALL permissions (asks confirmation
 ccm launch plan                        # Read-only mode
 ccm launch safe                        # Ask for everything
 ccm launch auto -c                     # Auto mode + continue last session
+```
+
+### Statusline
+
+```bash
+ccm statusline                         # Install statusline in Claude Code
+ccm statusline install                 # Same as above
+ccm statusline remove                  # Remove statusline
+```
+
+Or share with your team (no CCM needed):
+```bash
+curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/statusline.sh | bash
 ```
 
 ### Project Setup

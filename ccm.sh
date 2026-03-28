@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.2.0"
+readonly CCM_VERSION="3.3.0"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 readonly SCHEMA_VERSION="3.1"

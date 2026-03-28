@@ -2,6 +2,21 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [3.3.0] - 2026-03-28
+
+### Added
+- **`ccm statusline [install|remove]`** — install a smart statusline at the bottom of Claude Code showing context bar, token count, session cost, duration, burn rate, 5hr/7-day rate limits with reset times, project directory, git branch, Claude Code version, and CCM account info
+- **`ccm status --short`** — single-line account output for integrations
+- **Standalone statusline installer** — `curl -fsSL .../statusline.sh | bash` for sharing within orgs without CCM dependency
+- **Visual statusline guide** — `statusline.html` with annotated diagram explaining all 12 data points
+- Statusline adapts: 2 lines for single-account users, 3 lines for multi-account, compact warning at 80%+ context
+- Rate limit color coding: green <60%, yellow 60-79%, red 80%+
+
+### Fixed
+- Token count in statusline now matches Claude Code's display (sums input + cache_creation + cache_read)
+- `ccm status` now forwards arguments (was missing `shift` in dispatcher)
+- Statusline reads config from both `~/.claude/.claude.json` and `~/.claude.json` fallback
+
 ## [3.2.0] - 2026-03-28
 
 ### Added

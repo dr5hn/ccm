@@ -1,6 +1,6 @@
 ---
 name: ccm
-description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, launch modes, claudeignore, permission rules, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "launch auto", "launch yolo", "init", "permissions audit".
+description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, launch modes, claudeignore, permission rules, statusline, status bar, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "launch auto", "launch yolo", "init", "permissions audit", "statusline".
 allowed-tools: Bash(ccm *), Bash(~/.ccm/bin/ccm *), Bash(curl -fsSL *install.sh*)
 ---
 
@@ -109,6 +109,18 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm init` | Auto-generate .claudeignore for detected project type |
 | `ccm init --force` | Overwrite existing .claudeignore |
 
+### Statusline
+
+| Command | Description |
+|---------|-------------|
+| `ccm statusline` | Install smart statusline in Claude Code |
+| `ccm statusline install` | Same as above |
+| `ccm statusline remove` | Remove statusline and settings |
+
+Standalone install (no CCM needed): `curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/statusline.sh | bash`
+
+Shows: context bar, tokens, session cost, duration, burn rate, 5hr/7d rate limits, directory, branch, version.
+
 ### Permission Rules
 
 | Command | Description |
@@ -175,6 +187,12 @@ ccm launch auto        # auto-accept mode
 ccm launch yolo        # dangerous mode (skip all permissions)
 ccm launch plan        # read-only mode
 ccm launch auto -c     # auto mode + continue last session
+```
+
+### Install statusline
+```bash
+ccm statusline         # install — shows cost, tokens, rate limits, branch
+ccm statusline remove  # uninstall
 ```
 
 ### New project setup

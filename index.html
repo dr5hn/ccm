@@ -1033,6 +1033,12 @@ body {
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊜</div>
+        <div class="feature-name">Statusline</div>
+        <div class="feature-cmd">ccm statusline</div>
+        <div class="feature-desc">Live status bar: session cost, context %, tokens, burn rate, rate limits, branch. Shareable standalone install.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊝</div>
         <div class="feature-name">Environment Snapshots</div>
         <div class="feature-cmd">ccm env snapshot</div>
         <div class="feature-desc">Save and restore your Claude Code config. Audit MCP servers for token waste.</div>
@@ -1222,7 +1228,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Launcher &amp; Setup</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">7 commands</span>
+          <span class="cmd-count">9 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1235,6 +1241,7 @@ body {
           <tr><td>ccm launch safe</td><td>Ask for everything (default behavior)</td></tr>
           <tr><td>ccm init [--force]</td><td>Generate .claudeignore for detected project type</td></tr>
           <tr><td>ccm permissions audit [--fix]</td><td>Scan for duplicate/dead permission rules</td></tr>
+          <tr><td>ccm statusline [install|remove]</td><td>Install/remove smart status bar in Claude Code</td></tr>
         </table>
       </div>
     </div>
