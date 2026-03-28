@@ -5160,22 +5160,23 @@ input=$(cat)
 # ── Colors ──
 R="\033[0m" C="\033[36m" D="\033[90m" G="\033[32m" Y="\033[33m" RED="\033[31m"
 
-# ── Session data from Claude Code stdin ──
-PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
-# Total tokens = input + cache creation + cache read (matches Claude Code's RHS display)
-TOKENS=$(echo "$input" | jq -r '
-    (.context_window.current_usage.input_tokens // 0) +
-    (.context_window.current_usage.cache_creation_input_tokens // 0) +
-    (.context_window.current_usage.cache_read_input_tokens // 0)
-' 2>/dev/null)
-[[ -z "$TOKENS" || "$TOKENS" == "null" ]] && TOKENS=0
-COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
-DURATION_MS=$(echo "$input" | jq -r '.cost.total_duration_ms // 0' 2>/dev/null)
-CWD=$(echo "$input" | jq -r '.cwd // empty' 2>/dev/null)
+# ── Extract all session data in a single jq call for performance ──
+eval "$(echo "$input" | jq -r '
+    "PCT=\(.context_window.used_percentage // 0 | floor)",
+    "IN_TOK=\(.context_window.current_usage.input_tokens // 0)",
+    "CC_TOK=\(.context_window.current_usage.cache_creation_input_tokens // 0)",
+    "CR_TOK=\(.context_window.current_usage.cache_read_input_tokens // 0)",
+    "COST=\(.cost.total_cost_usd // 0)",
+    "DUR_MS=\(.cost.total_duration_ms // 0)",
+    "API_MS=\(.cost.total_api_duration_ms // 0)",
+    "CWD=\(.cwd // "" | @sh)",
+    "RL5_PCT=\(.rate_limits.five_hour.used_percentage // "" | tostring)",
+    "RL5_RESET=\(.rate_limits.five_hour.resets_at // "" | tostring)",
+    "RL7_PCT=\(.rate_limits.seven_day.used_percentage // "" | tostring)",
+    "RL7_RESET=\(.rate_limits.seven_day.resets_at // "" | tostring)"
+' 2>/dev/null)"
 
-# Rate limits (Pro/Max only — null for API users)
-RL5_PCT=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty' 2>/dev/null)
-RL5_RESET=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty' 2>/dev/null)
+TOKENS=$((IN_TOK + CC_TOK + CR_TOK))
 
 # ── Context bar (10 chars) ──
 PCT_NUM=${PCT:-0}
@@ -5201,46 +5202,75 @@ fi
 # ── Format cost ──
 COST_FMT=$(awk "BEGIN{printf \"\$%.2f\", $COST}" 2>/dev/null || echo "\$$COST")
 
-# ── Format duration ──
-DURATION_S=$((DURATION_MS / 1000))
-if [[ "$DURATION_S" -ge 3600 ]]; then
-    DUR_FMT="$((DURATION_S / 3600))h$((DURATION_S % 3600 / 60))m"
-elif [[ "$DURATION_S" -ge 60 ]]; then
-    DUR_FMT="$((DURATION_S / 60))m"
+# ── Format session duration ──
+DUR_S=$((DUR_MS / 1000))
+if [[ "$DUR_S" -ge 3600 ]]; then
+    DUR_FMT="$((DUR_S / 3600))h$((DUR_S % 3600 / 60))m"
+elif [[ "$DUR_S" -ge 60 ]]; then
+    DUR_FMT="$((DUR_S / 60))m"
 else
-    DUR_FMT="${DURATION_S}s"
+    DUR_FMT="${DUR_S}s"
 fi
 
-# ── Format rate limit ──
-RL_FMT=""
-if [[ -n "$RL5_PCT" ]]; then
-    RL5_INT=$(echo "$RL5_PCT" | cut -d. -f1)
-    if [[ "$RL5_INT" -ge 80 ]]; then RL_C="$RED"
-    elif [[ "$RL5_INT" -ge 60 ]]; then RL_C="$Y"
-    else RL_C="$G"; fi
+# ── Format API latency ──
+API_S=$((API_MS / 1000))
+if [[ "$API_S" -ge 3600 ]]; then
+    API_FMT="$((API_S / 3600))h$((API_S % 3600 / 60))m"
+elif [[ "$API_S" -ge 60 ]]; then
+    API_FMT="$((API_S / 60))m"
+elif [[ "$API_S" -gt 0 ]]; then
+    API_FMT="${API_S}s"
+else
+    API_FMT=""
+fi
 
-    RESET_FMT=""
-    if [[ -n "$RL5_RESET" ]] && [[ "$RL5_RESET" != "null" ]]; then
+# ── Token burn rate (tokens per minute) ──
+BURN_FMT=""
+if [[ "$DUR_S" -gt 60 ]] && [[ "$TOKENS" -gt 0 ]]; then
+    BURN=$((TOKENS / (DUR_S / 60)))
+    if [[ "$BURN" -ge 1000000 ]]; then
+        BURN_FMT="$(awk "BEGIN{printf \"%.1fM\", $BURN/1000000}")/m"
+    elif [[ "$BURN" -ge 1000 ]]; then
+        BURN_FMT="$(awk "BEGIN{printf \"%.0fK\", $BURN/1000}")/m"
+    else
+        BURN_FMT="${BURN}/m"
+    fi
+fi
+
+# ── Format rate limits (5hr + 7day) ──
+_fmt_rl() {
+    local pct="$1" reset="$2" label="$3"
+    [[ -z "$pct" || "$pct" == "null" ]] && return
+    local pint=$(echo "$pct" | cut -d. -f1)
+    local rc="$G"
+    [[ "$pint" -ge 80 ]] && rc="$RED"
+    [[ "$pint" -ge 60 ]] && [[ "$pint" -lt 80 ]] && rc="$Y"
+    local rfmt=""
+    if [[ -n "$reset" ]] && [[ "$reset" != "null" ]]; then
         case "$(uname)" in
-            Darwin) RESET_FMT=$(date -r "$RL5_RESET" +%H:%M 2>/dev/null) ;;
-            *)      RESET_FMT=$(date -d "@$RL5_RESET" +%H:%M 2>/dev/null) ;;
+            Darwin) rfmt=$(date -r "$reset" +%H:%M 2>/dev/null) ;;
+            *)      rfmt=$(date -d "@$reset" +%H:%M 2>/dev/null) ;;
         esac
     fi
-    RL_FMT=" ${D}·${R} ${RL_C}5hr: ${RL5_INT}%${R}"
-    [[ -n "$RESET_FMT" ]] && RL_FMT+="${D} ↻${RESET_FMT}${R}"
-fi
+    printf " ${D}·${R} ${rc}${label}: ${pint}%%${R}"
+    [[ -n "$rfmt" ]] && printf "${D} ↻${rfmt}${R}"
+}
+
+RL_FMT=""
+RL_FMT+="$(_fmt_rl "$RL5_PCT" "$RL5_RESET" "5hr")"
+RL_FMT+="$(_fmt_rl "$RL7_PCT" "$RL7_RESET" "7d")"
 
 # ── Git branch ──
 BRANCH=""
-if [[ -n "$CWD" ]] && command -v git &>/dev/null; then
-    BRANCH=$(git -C "$CWD" branch --show-current 2>/dev/null)
+CWD_CLEAN=$(echo "$CWD" | tr -d "'")
+if [[ -n "$CWD_CLEAN" ]] && command -v git &>/dev/null; then
+    BRANCH=$(git -C "$CWD_CLEAN" branch --show-current 2>/dev/null)
 fi
 
 # ── Directory (short) ──
 DIR_SHORT=""
-if [[ -n "$CWD" ]]; then
-    DIR_SHORT="${CWD/#$HOME/~}"
-    # Truncate to last 30 chars
+if [[ -n "$CWD_CLEAN" ]]; then
+    DIR_SHORT="${CWD_CLEAN/#$HOME/~}"
     [[ ${#DIR_SHORT} -gt 30 ]] && DIR_SHORT="…${DIR_SHORT: -29}"
 fi
 
@@ -5266,12 +5296,23 @@ if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
     fi
 fi
 
-# ── LINE 1: Context + tokens + cost + rate limit ──
-echo -e "${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT} ${D}·${R} ${DUR_FMT}${RL_FMT}"
+# ── Compact warning ──
+COMPACT_WARN=""
+if [[ "$PCT_NUM" -ge 80 ]]; then
+    COMPACT_WARN=" ${D}·${R} ${Y}⚠ /compact${R}"
+fi
 
-# ── LINE 2: Directory + branch (always shown) ──
+# ── LINE 1: Context + tokens + cost + duration + API + burn rate + rate limits ──
+L1="${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT} ${D}·${R} ${DUR_FMT}"
+[[ -n "$API_FMT" ]] && L1+=" ${D}(api ${API_FMT})${R}"
+[[ -n "$BURN_FMT" ]] && L1+=" ${D}·${R} ${BURN_FMT}"
+L1+="${RL_FMT}"
+echo -e "$L1"
+
+# ── LINE 2: Directory + branch + compact warning ──
 L2="${C}${DIR_SHORT}${R}"
 [[ -n "$BRANCH" ]] && L2+=" ${D}·${R} ${G}${BRANCH}${R}"
+L2+="${COMPACT_WARN}"
 echo -e "$L2"
 
 # ── LINE 3: Account info (only if 2+ accounts managed) ──
