@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.1.0"
+readonly CCM_VERSION="3.2.0"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 readonly SCHEMA_VERSION="3.1"
@@ -5116,7 +5116,7 @@ cmd_init() {
     [[ -f "build.gradle" || -f "pom.xml" ]]   && types+=("java")
     [[ -f "Gemfile" ]]           && types+=("ruby")
     [[ -f "composer.json" ]]     && types+=("php")
-    [[ -f "*.sln" || -f "*.csproj" ]] 2>/dev/null && types+=("dotnet")
+    compgen -G "*.sln" >/dev/null 2>&1 || compgen -G "*.csproj" >/dev/null 2>&1 && types+=("dotnet")
     [[ -f "pubspec.yaml" ]]      && types+=("dart")
     [[ -f "Package.swift" ]]     && types+=("swift")
 
@@ -5279,7 +5279,7 @@ out/
     printf '%s' "$content" > "$target"
     log_success "Generated $target for: ${types[*]}"
     echo ""
-    echo "  Patterns added: $(grep -c '^[^#]' "$target" | tr -d ' ') rules"
+    echo "  Patterns added: $(grep -c '^[^#]' "$target" 2>/dev/null || echo "0") rules"
     echo "  Edit $target to customize further."
 }
 
@@ -5335,13 +5335,15 @@ permissions_audit() {
         echo "  Rules: $allow_count allow, $deny_count deny, $ask_count ask ($total total)"
 
         # Check for duplicates
-        local allow_dupes deny_dupes
+        local allow_dupes deny_dupes ask_dupes
         allow_dupes=$(jq '[.permissions.allow // [] | .[] ] | group_by(.) | map(select(length > 1) | {rule: .[0], count: length}) | length' "$file" 2>/dev/null || echo "0")
         deny_dupes=$(jq '[.permissions.deny // [] | .[] ] | group_by(.) | map(select(length > 1) | {rule: .[0], count: length}) | length' "$file" 2>/dev/null || echo "0")
+        ask_dupes=$(jq '[.permissions.ask // [] | .[] ] | group_by(.) | map(select(length > 1) | {rule: .[0], count: length}) | length' "$file" 2>/dev/null || echo "0")
 
-        if [[ "$allow_dupes" -gt 0 ]] || [[ "$deny_dupes" -gt 0 ]]; then
-            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Duplicates: $allow_dupes in allow, $deny_dupes in deny"
-            issues=$((issues + allow_dupes + deny_dupes))
+        local total_dupes=$((allow_dupes + deny_dupes + ask_dupes))
+        if [[ "$total_dupes" -gt 0 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Duplicates: $allow_dupes in allow, $deny_dupes in deny, $ask_dupes in ask"
+            issues=$((issues + total_dupes))
 
             # Show duplicate rules
             if [[ "$allow_dupes" -gt 0 ]]; then
@@ -5386,14 +5388,23 @@ permissions_audit() {
         fi
 
         # Fix mode: remove duplicates
-        if [[ "$fix_mode" -eq 1 ]] && [[ "$allow_dupes" -gt 0 || "$deny_dupes" -gt 0 ]]; then
+        if [[ "$fix_mode" -eq 1 ]] && [[ "$total_dupes" -gt 0 ]]; then
+            # Backup before modifying
+            cp "$file" "${file}.bak"
+            log_step "  Backup saved to ${filename}.bak"
+
             local fixed
             fixed=$(jq '
                 .permissions.allow = ([.permissions.allow // [] | .[] ] | unique) |
                 .permissions.deny = ([.permissions.deny // [] | .[] ] | unique) |
                 .permissions.ask = ([.permissions.ask // [] | .[] ] | unique)
             ' "$file")
-            write_json "$file" "$fixed"
+
+            # Preserve original permissions (don't apply chmod 600)
+            local orig_perms
+            orig_perms=$(stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null || echo "644")
+            echo "$fixed" > "${file}.tmp" && mv "${file}.tmp" "$file"
+            chmod "$orig_perms" "$file"
 
             local new_allow new_deny
             new_allow=$(echo "$fixed" | jq '[.permissions.allow // [] | .[]] | length')

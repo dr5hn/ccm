@@ -18,6 +18,8 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 ### Account Management
 - **Multi-account switching** — add, remove, and switch between Claude Code accounts
 - **Account aliases** — friendly names like `work` or `personal` for quick access
+- **Account reorder** — rearrange account positions with automatic credential renaming
+- **Project bindings** — bind directories to accounts, auto-switch with `ccm switch`
 - **Switch history and undo** — track switches and revert instantly
 - **Health verification** — validate backup integrity for all accounts
 - **Export/Import** — backup and restore account configurations as portable archives
@@ -25,9 +27,18 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 
 ### Session Management
 - **Session listing** — view all Claude Code project sessions with size and age
+- **Session search** — full-text search across all conversation history
 - **Session info** — inspect sessions for a specific project directory
 - **Session relocation** — move sessions when a project folder is relocated
 - **Session cleanup** — remove orphaned sessions for projects that no longer exist
+
+### Launcher
+- **Launch modes** — `ccm launch auto|yolo|plan|safe` for preset permission modes
+- **Terminal reset** — automatically fixes broken Ctrl-C/Ctrl-D after Claude Code exit in tmux
+- **Pass-through args** — any extra flags forwarded to Claude Code
+
+### Project Setup
+- **Init** — auto-generate `.claudeignore` based on detected project type (Node, Python, Go, Rust, Java, Ruby, PHP, .NET, Dart, Swift)
 
 ### Environment Snapshots
 - **Snapshot capture** — save current Claude Code environment (settings, MCP config, CLAUDE.md)
@@ -35,9 +46,10 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 - **MCP audit** — flag MCP servers with CLI alternatives to save tokens
 
 ### Health & Maintenance
-- **Doctor** — scan `~/.claude/` for stale locks, log bloat, cache size, orphaned sessions
-- **Clean** — targeted cleanup for debug logs, telemetry, todos, cache, history
-- **Auto-fix** — `ccm doctor --fix` resolves safe issues automatically
+- **Doctor** — 13 health checks: stale locks, log bloat, cache, telemetry, todos, paste cache, file history, shell snapshots, orphaned sessions, total disk size, tmp files, orphaned processes, hook async config
+- **Clean** — targeted cleanup for debug logs, telemetry, todos, cache, history, tmp output files, orphaned processes
+- **Permissions audit** — find duplicate, contradictory, and dead permission rules in settings.json
+- **Auto-fix** — `ccm doctor --fix` and `ccm permissions audit --fix` resolve safe issues automatically
 
 ### Token Optimization
 - **Optimize** — analyze context window footprint and suggest reductions
@@ -47,6 +59,7 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 ### Usage Statistics
 - **Summary** — total projects, sessions, disk usage at a glance
 - **Top projects** — rank projects by disk usage to identify space hogs
+- **Token history** — per-project and per-day token usage breakdown from session JSONL files
 
 ## Installation
 
@@ -131,11 +144,15 @@ After each switch, restart Claude Code to use the new authentication.
 ```bash
 ccm add                        # Add current Claude Code account
 ccm remove <id>                # Remove by number, email, or alias
-ccm switch [id]                # Switch to next account, or specific target
+ccm switch [id]                # Switch to next, specific, or project-bound account
 ccm undo                       # Revert to the previous account
-ccm list                       # List all managed accounts
+ccm list                       # List all managed accounts and bindings
 ccm status                     # Show active account details
 ccm alias <id> <name>          # Set a friendly alias
+ccm reorder <from> <to>        # Reorder account positions
+ccm bind [path] <account>      # Bind project directory to an account
+ccm unbind [path]              # Remove project binding
+ccm bind list                  # Show all project bindings
 ccm verify [id]                # Verify backup integrity
 ccm history                    # View switch history
 ccm export <path>              # Export accounts to archive
@@ -148,8 +165,27 @@ ccm interactive                # Launch interactive menu
 ```bash
 ccm session list                       # List all project sessions
 ccm session info <project-path>        # Show sessions for a project (use . for cwd)
+ccm session search <query> [--limit N] # Full-text search across all sessions
 ccm session relocate <old> <new>       # Update sessions after moving a project
 ccm session clean [--dry-run]          # Remove orphaned sessions
+```
+
+### Launcher
+
+```bash
+ccm launch                             # Launch Claude Code with terminal reset
+ccm launch auto                        # Auto-accept most actions
+ccm launch yolo                        # Skip ALL permissions (asks confirmation)
+ccm launch plan                        # Read-only mode
+ccm launch safe                        # Ask for everything
+ccm launch auto -c                     # Auto mode + continue last session
+```
+
+### Project Setup
+
+```bash
+ccm init                               # Generate .claudeignore for this project
+ccm init --force                       # Overwrite existing .claudeignore
 ```
 
 ### Environment Snapshots
@@ -165,14 +201,18 @@ ccm env audit                          # Audit MCP servers for token efficiency
 ### Health & Maintenance
 
 ```bash
-ccm doctor                             # Scan for health issues
+ccm doctor                             # 13 health checks
 ccm doctor --fix                       # Auto-fix safe issues
 ccm clean debug [--days N]             # Clean debug logs (default: 30 days)
 ccm clean telemetry                    # Remove telemetry data
 ccm clean todos [--days N]             # Remove old todo files
 ccm clean history [--keep N]           # Trim history (default: keep 1000)
+ccm clean tmp [--days N]               # Clean orphaned tmp output files (default: 1 day)
+ccm clean processes                    # Kill orphaned Claude subagent processes
 ccm clean cache                        # Clean plugin cache
 ccm clean all [--dry-run]              # Clean everything safe
+ccm permissions audit                  # Scan for duplicate/dead permission rules
+ccm permissions audit --fix            # Auto-remove duplicates
 ```
 
 ### Token Optimization
@@ -186,12 +226,14 @@ ccm optimize                           # Analyze token usage and suggest reducti
 ```bash
 ccm usage summary                      # Usage overview
 ccm usage top [--count N]              # Top projects by disk usage
+ccm usage history [--days N]           # Token usage by project and day
+ccm usage history --project <path>     # Token usage for a specific project
 ```
 
 ### Global Options
 
 ```bash
-ccm help [module]                      # Show help (doctor, clean, optimize, session, env, usage)
+ccm help [module]                      # Show help (launch, init, permissions, doctor, etc.)
 ccm version                            # Show version
 ccm --no-color <command>               # Disable colored output
 ```
@@ -207,14 +249,54 @@ ccm undo               # oops, revert
 ccm history            # see recent switches
 ```
 
+### Project-Specific Accounts
+
+```bash
+ccm bind ~/work/project work       # bind project to work account
+ccm bind . personal                # bind current directory
+ccm bind list                      # show all bindings
+# Now `ccm switch` in a bound directory auto-switches
+```
+
+### Launch Claude Code with Presets
+
+```bash
+ccm launch auto        # auto-accept mode
+ccm launch yolo        # dangerous mode (skip all permissions)
+ccm launch plan        # read-only mode
+ccm launch auto -c     # auto mode + continue last session
+```
+
+### New Project Setup
+
+```bash
+ccm init               # auto-generate .claudeignore
+ccm permissions audit  # check for dead/duplicate permission rules
+```
+
+### Token Usage Analytics
+
+```bash
+ccm usage history              # last 7 days, all projects
+ccm usage history --days 30    # last 30 days
+ccm usage history --project .  # current project only
+```
+
+### Search Conversation History
+
+```bash
+ccm session search "error handling"   # search across all sessions
+ccm session search "API" --limit 5    # limit results
+```
+
 ### Disk Cleanup
 
 ```bash
-ccm doctor             # see what's eating space
+ccm doctor             # 13 health checks
 ccm doctor --fix       # auto-fix safe issues
+ccm clean tmp          # clean orphaned tmp output files
+ccm clean processes    # kill leaked subagent processes
 ccm clean all --dry-run # preview all cleanups
-ccm session clean      # remove orphaned sessions
-ccm usage top          # find biggest projects
 ```
 
 ### Token Optimization

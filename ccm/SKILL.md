@@ -1,6 +1,6 @@
 ---
 name: ccm
-description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history".
+description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, launch modes, claudeignore, permission rules, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "launch auto", "launch yolo", "init", "permissions audit".
 allowed-tools: Bash(ccm *), Bash(~/.ccm/bin/ccm *), Bash(curl -fsSL *install.sh*)
 ---
 
@@ -92,6 +92,30 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm clean cache` | Clean plugin cache (old versions) |
 | `ccm clean all [--dry-run]` | Clean everything safe to clean |
 
+### Launcher
+
+| Command | Description |
+|---------|-------------|
+| `ccm launch` | Launch Claude Code with terminal reset on exit |
+| `ccm launch auto` | Auto-accept most actions |
+| `ccm launch yolo` | Skip ALL permissions (asks confirmation first) |
+| `ccm launch plan` | Read-only mode |
+| `ccm launch safe` | Ask for everything |
+
+### Project Setup
+
+| Command | Description |
+|---------|-------------|
+| `ccm init` | Auto-generate .claudeignore for detected project type |
+| `ccm init --force` | Overwrite existing .claudeignore |
+
+### Permission Rules
+
+| Command | Description |
+|---------|-------------|
+| `ccm permissions audit` | Scan for duplicates, contradictions, verbatim rules, bloat |
+| `ccm permissions audit --fix` | Auto-remove duplicate rules |
+
 ### Token Optimization
 
 | Command | Description |
@@ -145,6 +169,20 @@ ccm session search "error handling"       # find across all sessions
 ccm session search "API" --limit 5        # limit results
 ```
 
+### Launch Claude Code with preset modes
+```bash
+ccm launch auto        # auto-accept mode
+ccm launch yolo        # dangerous mode (skip all permissions)
+ccm launch plan        # read-only mode
+ccm launch auto -c     # auto mode + continue last session
+```
+
+### New project setup
+```bash
+ccm init               # auto-generate .claudeignore
+ccm permissions audit  # check for dead/duplicate permission rules
+```
+
 ### Disk cleanup
 ```bash
 ccm doctor             # see what's eating space (13 checks)
@@ -158,6 +196,7 @@ ccm clean all --dry-run # preview all cleanups
 ```bash
 ccm optimize           # see what's inflating your context window
 ccm env audit          # check MCP servers for CLI alternatives
+ccm permissions audit  # find bloated permission rules
 ```
 
 ### Moving a project folder

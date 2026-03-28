@@ -2,7 +2,23 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
-## [3.1.0] - 2026-03-27
+## [3.2.0] - 2026-03-28
+
+### Added
+- **`ccm launch [auto|yolo|plan|safe]`** — launch Claude Code with preset permission modes and terminal state reset on exit (fixes broken Ctrl-C/Ctrl-D in tmux/kitty/ghostty)
+- **`ccm init [--force]`** — auto-generate `.claudeignore` based on detected project type (Node, Python, Go, Rust, Java, Ruby, PHP, .NET, Dart, Swift)
+- **`ccm permissions audit [--fix]`** — scan settings.json for duplicate rules, contradictions, verbatim "Always Allow" junk, and rule count bloat
+
+### Fixed
+- Atomic credential writes on Linux/WSL (temp file + mv) to prevent corruption on interrupted writes
+- Atomic config backup writes (same pattern)
+- Stale bindings now auto-removed when an account is deleted
+- Reorder writes sequence.json before credential rename for safe recovery if interrupted
+- Bindings updated during account reorder to reference new account numbers
+- `--keep 0` in `clean_history` rejected (would wipe entire file)
+- `cmd_optimize` MEMORY.md path encoding fixed (`%2F` → `-`)
+
+## [3.1.0] - 2026-03-28
 
 ### Added
 - **`ccm clean tmp`** — clean orphaned subagent output files from `/tmp/claude-*/` (`--days N`, default 1)
@@ -11,6 +27,7 @@ All notable changes to CCM (Claude Code Manager) will be documented in this file
 - **`ccm session search`** — full-text search across all session JSONL files (`--limit N`)
 - **`ccm reorder`** — reorder account positions with automatic credential renaming
 - **`ccm bind`** / **`ccm unbind`** — bind project directories to specific accounts for auto-switching
+- **`ccm list`** now shows project bindings
 - **Enhanced `ccm doctor`** — 4 new health checks: total disk size, tmp output files, orphaned processes, hook async audit
 
 ### Changed
