@@ -2,6 +2,22 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [3.1.0] - 2026-03-27
+
+### Added
+- **`ccm clean tmp`** — clean orphaned subagent output files from `/tmp/claude-*/` (`--days N`, default 1)
+- **`ccm clean processes`** — detect and kill orphaned Claude subagent processes
+- **`ccm usage history`** — token usage analytics with per-project and per-day breakdowns (`--days N`, `--project <path>`)
+- **`ccm session search`** — full-text search across all session JSONL files (`--limit N`)
+- **`ccm reorder`** — reorder account positions with automatic credential renaming
+- **`ccm bind`** / **`ccm unbind`** — bind project directories to specific accounts for auto-switching
+- **Enhanced `ccm doctor`** — 4 new health checks: total disk size, tmp output files, orphaned processes, hook async audit
+
+### Changed
+- `ccm switch` (no args) now checks project bindings before cycling to next account
+- `ccm clean all` now includes tmp file cleanup and orphaned process detection
+- Schema version bumped to 3.1 (auto-migrates from 3.0, adds `bindings` field)
+
 ## [3.0.1] - 2026-03-25
 
 ### Fixed

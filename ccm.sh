@@ -6,10 +6,10 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.0.1"
+readonly CCM_VERSION="3.1.0"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
-readonly SCHEMA_VERSION="3.0"
+readonly SCHEMA_VERSION="3.1"
 readonly MAX_HISTORY_ENTRIES=10
 readonly CLAUDE_PROJECTS_DIR="$HOME/.claude/projects"
 
@@ -402,7 +402,8 @@ init_sequence_file() {
   "lastUpdated": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
   "sequence": [],
   "accounts": {},
-  "history": []
+  "history": [],
+  "bindings": {}
 }'
         write_json "$SEQUENCE_FILE" "$init_content"
         invalidate_cache
@@ -455,8 +456,21 @@ migrate_sequence_file() {
     # Migrate from 2.0 to 3.0
     if [[ "$current_version" == "2.0" ]]; then
         local migrated
+        migrated=$(jq '
+            .schemaVersion = "3.0"
+        ' "$SEQUENCE_FILE")
+
+        write_json "$SEQUENCE_FILE" "$migrated"
+        invalidate_cache
+        current_version="3.0"
+    fi
+
+    # Migrate from 3.0 to 3.1 (add bindings)
+    if [[ "$current_version" == "3.0" ]]; then
+        local migrated
         migrated=$(jq --arg version "$SCHEMA_VERSION" '
-            .schemaVersion = $version
+            .schemaVersion = $version |
+            .bindings = (.bindings // {})
         ' "$SEQUENCE_FILE")
 
         write_json "$SEQUENCE_FILE" "$migrated"
@@ -664,6 +678,7 @@ cmd_session() {
         info)       shift; session_info "$@" ;;
         relocate)   shift; session_relocate "$@" ;;
         clean)      shift; session_clean "$@" ;;
+        search)     shift; session_search "$@" ;;
         "")         show_help session ;;
         *)          log_error "Unknown session command '$1'"; show_help session; exit 1 ;;
     esac
@@ -980,6 +995,119 @@ session_clean() {
     log_success "Removed $removed orphaned session(s), freed $total_human"
 }
 
+# Purpose: Full-text search across all JSONL session files
+# Parameters: $1 — search query, [--limit N] (default 10)
+# Returns: 0 on success
+# Usage: session_search "error handling" | session_search "API" --limit 5
+session_search() {
+    local query=""
+    local limit=10
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit) limit="$2"; shift 2 ;;
+            -*)      log_error "Unknown option '$1'"; return 1 ;;
+            *)       query="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$query" ]]; then
+        log_error "Search query required."
+        echo "Usage: ccm session search <query> [--limit N]"
+        return 1
+    fi
+
+    if ! [[ "$limit" =~ ^[0-9]+$ ]] || [[ "$limit" -eq 0 ]]; then
+        log_error "--limit must be a positive integer."
+        return 1
+    fi
+
+    if [[ ! -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        log_error "No sessions found."
+        return 1
+    fi
+
+    echo -e "${COLOR_BOLD}Session Search: \"$query\"${COLOR_RESET}"
+    echo ""
+
+    local results=()
+    local match_count=0
+
+    for project_dir in "$CLAUDE_PROJECTS_DIR"/*/; do
+        [[ -d "$project_dir" ]] || continue
+
+        local dirname
+        dirname=$(basename "$project_dir")
+        local decoded_path
+        decoded_path=$(decode_project_path "$dirname")
+        local display_path
+        display_path=$(truncate_path "$decoded_path")
+
+        while IFS= read -r -d '' jsonl_file; do
+            # Search for query in file (case-insensitive, fixed string)
+            local first_match
+            first_match=$(grep -i -m 1 -F "$query" "$jsonl_file" 2>/dev/null) || continue
+
+            local timestamp
+            timestamp=$(echo "$first_match" | jq -r '.timestamp // "unknown"' 2>/dev/null)
+
+            # Extract text snippet from message content
+            local snippet
+            snippet=$(echo "$first_match" | jq -r '
+                (.message.content // "") |
+                if type == "array" then
+                    map(select(type == "object" and .type == "text") | .text) | join(" ")
+                elif type == "string" then .
+                else ""
+                end
+            ' 2>/dev/null)
+
+            # If snippet is empty, try data field
+            if [[ -z "$snippet" || "$snippet" == "null" ]]; then
+                snippet=$(echo "$first_match" | jq -r '(.data // "") | if type == "string" then . else "" end' 2>/dev/null)
+            fi
+
+            snippet="${snippet:0:120}"
+            [[ ${#snippet} -ge 120 ]] && snippet="${snippet}..."
+
+            local time_display="unknown"
+            if [[ "$timestamp" != "unknown" && "$timestamp" != "null" ]]; then
+                time_display="${timestamp:0:10} ${timestamp:11:8}"
+            fi
+
+            local sep=$'\x1F'
+            results+=("${timestamp}${sep}${display_path}${sep}${time_display}${sep}${snippet}")
+            match_count=$((match_count + 1))
+
+            [[ "$match_count" -ge "$limit" ]] && break 2
+        done < <(find "$project_dir" -maxdepth 2 -name "*.jsonl" -print0 2>/dev/null)
+    done
+
+    if [[ ${#results[@]} -eq 0 ]]; then
+        log_info "No matches found for \"$query\""
+        return 0
+    fi
+
+    # Sort results by timestamp descending and display
+    local sep=$'\x1F'
+    local sorted
+    sorted=$(printf '%s\n' "${results[@]}" | sort -t"$sep" -k1 -r)
+
+    local idx=0
+    while IFS=$'\x1F' read -r ts project time_disp snippet; do
+        [[ -z "$ts" ]] && continue
+        idx=$((idx + 1))
+        echo -e "  ${COLOR_BOLD}$idx.${COLOR_RESET} ${COLOR_CYAN}$project${COLOR_RESET}"
+        echo "     $time_disp"
+        if [[ -n "$snippet" && "$snippet" != "null" ]]; then
+            echo "     $snippet"
+        fi
+        echo ""
+    done <<< "$sorted"
+
+    echo "Found $match_count result(s)"
+}
+
 # Add account
 # Purpose: Adds the currently logged-in Claude Code account to managed accounts
 # Parameters: None
@@ -1270,11 +1398,33 @@ cmd_switch() {
     fi
     
     # wait_for_claude_close
-    
+
+    # Check if current directory has a project binding
+    local cwd
+    cwd=$(pwd)
+    local bound_account
+    bound_account=$(jq -r --arg path "$cwd" '.bindings[$path] // empty' "$SEQUENCE_FILE" 2>/dev/null)
+
+    if [[ -n "$bound_account" ]]; then
+        local active_account
+        active_account=$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")
+        if [[ "$active_account" == "$bound_account" ]]; then
+            local bound_email
+            bound_email=$(jq -r --arg n "$bound_account" '.accounts[$n].email // "unknown"' "$SEQUENCE_FILE")
+            log_info "Already on bound account $bound_account ($bound_email) for this project."
+            return 0
+        fi
+        local bound_email
+        bound_email=$(jq -r --arg n "$bound_account" '.accounts[$n].email // "unknown"' "$SEQUENCE_FILE")
+        log_info "Project binding: switching to Account-$bound_account ($bound_email)"
+        perform_switch "$bound_account"
+        return $?
+    fi
+
     local active_account sequence
     active_account=$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")
     sequence=($(jq -r '.sequence[]' "$SEQUENCE_FILE"))
-    
+
     # Find next account in sequence
     local next_account current_index=0
     for i in "${!sequence[@]}"; do
@@ -1283,9 +1433,9 @@ cmd_switch() {
             break
         fi
     done
-    
+
     next_account="${sequence[$(((current_index + 1) % ${#sequence[@]}))]}"
-    
+
     perform_switch "$next_account"
 }
 
@@ -1732,6 +1882,364 @@ cmd_undo() {
 
     log_info "Undoing last switch to Account-$from_account..."
     perform_switch "$from_account"
+}
+
+# Purpose: Reorders accounts by moving one account to a new position
+# Parameters: $1 — source position (current account number), $2 — target position
+# Returns: 0 on success, 1 on failure
+# Usage: cmd_reorder 3 1
+cmd_reorder() {
+    if [[ $# -lt 2 ]]; then
+        log_error "Usage: ccm reorder <from_position> <to_position>"
+        exit 1
+    fi
+
+    local from_pos="$1"
+    local to_pos="$2"
+
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_error "No accounts are managed yet."
+        exit 1
+    fi
+
+    migrate_sequence_file
+
+    # Validate positions are numbers
+    if ! [[ "$from_pos" =~ ^[0-9]+$ ]] || ! [[ "$to_pos" =~ ^[0-9]+$ ]]; then
+        log_error "Positions must be numbers."
+        exit 1
+    fi
+
+    # Validate source account exists
+    local from_account
+    from_account=$(jq -r --arg num "$from_pos" '.accounts[$num] // empty' "$SEQUENCE_FILE")
+    if [[ -z "$from_account" ]]; then
+        log_error "No account at position $from_pos."
+        exit 1
+    fi
+
+    if [[ "$from_pos" == "$to_pos" ]]; then
+        log_info "Account is already at position $to_pos."
+        return 0
+    fi
+
+    # Get all account numbers sorted
+    local account_nums
+    account_nums=$(jq -r '.sequence | sort | map(tostring) | .[]' "$SEQUENCE_FILE")
+
+    # Check target position is reasonable (1 to max)
+    local max_num
+    max_num=$(jq -r '.sequence | max' "$SEQUENCE_FILE")
+    if [[ "$to_pos" -lt 1 ]] || [[ "$to_pos" -gt "$max_num" ]]; then
+        log_error "Target position must be between 1 and $max_num."
+        exit 1
+    fi
+
+    echo -e "${COLOR_BOLD}Reorder Accounts${COLOR_RESET}"
+    echo ""
+
+    # Show current state
+    echo "Before:"
+    while IFS= read -r num; do
+        local email alias_name
+        email=$(jq -r --arg n "$num" '.accounts[$n].email' "$SEQUENCE_FILE")
+        alias_name=$(jq -r --arg n "$num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE")
+        local label="$email"
+        [[ -n "$alias_name" ]] && label="$email [$alias_name]"
+        echo "  $num: $label"
+    done <<< "$account_nums"
+    echo ""
+
+    show_progress "Reordering accounts"
+
+    local platform
+    platform=$(detect_platform)
+    local active_num
+    active_num=$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")
+
+    # Build the reorder mapping: determine which account numbers need to change
+    # Strategy: remove from_pos from sequence, insert at to_pos, then renumber sequentially
+    local ordered_nums=()
+    while IFS= read -r num; do
+        [[ "$num" == "$from_pos" ]] && continue
+        ordered_nums+=("$num")
+    done <<< "$account_nums"
+
+    # Insert from_pos at the right position (to_pos - 1 index, since we number from 1)
+    local insert_idx=$((to_pos - 1))
+    if [[ "$insert_idx" -ge "${#ordered_nums[@]}" ]]; then
+        ordered_nums+=("$from_pos")
+    else
+        ordered_nums=("${ordered_nums[@]:0:$insert_idx}" "$from_pos" "${ordered_nums[@]:$insert_idx}")
+    fi
+
+    # Now renumber: ordered_nums[0] becomes 1, ordered_nums[1] becomes 2, etc.
+    # Build a mapping of old_num -> new_num
+    declare -A num_map
+    local new_sequence=()
+    for i in "${!ordered_nums[@]}"; do
+        local old_num="${ordered_nums[$i]}"
+        local new_num=$((i + 1))
+        num_map[$old_num]=$new_num
+        new_sequence+=("$new_num")
+    done
+
+    # Build the mapping JSON first — validate before touching any files
+    local map_json="{}"
+    for k in "${!num_map[@]}"; do
+        map_json=$(jq -n --argjson obj "$map_json" --arg k "$k" --argjson v "${num_map[$k]}" '$obj + {($k): $v}')
+    done
+
+    local new_active=$active_num
+    [[ -n "${num_map[$active_num]+x}" ]] && new_active=${num_map[$active_num]}
+
+    local seq_json
+    seq_json=$(printf '%s\n' "${new_sequence[@]}" | jq -s '.')
+
+    # Pre-validate: build the new sequence.json content BEFORE renaming files
+    local updated_sequence
+    updated_sequence=$(jq --argjson seq "$seq_json" --argjson active "$new_active" --argjson map "$map_json" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        .sequence = $seq |
+        .activeAccountNumber = $active |
+        .lastUpdated = $now |
+        .accounts = (
+            .accounts | to_entries | map(
+                .key = (if $map[.key] != null then ($map[.key] | tostring) else .key end) |
+                .
+            ) | from_entries
+        )
+    ' "$SEQUENCE_FILE") || {
+        log_error "Failed to build updated sequence. No changes made."
+        complete_progress
+        return 1
+    }
+
+    # Validate the generated JSON before proceeding
+    if ! echo "$updated_sequence" | jq empty 2>/dev/null; then
+        log_error "Generated invalid JSON. No changes made."
+        complete_progress
+        return 1
+    fi
+
+    # Now safe to rename credential files (two-pass to avoid collisions)
+    # Pass 1: rename to temp names
+    for old_num in "${!num_map[@]}"; do
+        local new_num=${num_map[$old_num]}
+        [[ "$old_num" == "$new_num" ]] && continue
+
+        local email
+        email=$(jq -r --arg n "$old_num" '.accounts[$n].email' "$SEQUENCE_FILE")
+
+        case "$platform" in
+            macos)
+                local creds
+                creds=$(security find-generic-password -s "Claude Code-Account-${old_num}-${email}" -w 2>/dev/null || echo "")
+                if [[ -n "$creds" ]]; then
+                    security add-generic-password -U -s "Claude Code-Account-tmp-${old_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null
+                    security delete-generic-password -s "Claude Code-Account-${old_num}-${email}" 2>/dev/null || true
+                fi
+                ;;
+            linux|wsl)
+                local old_cred="$BACKUP_DIR/credentials/.claude-credentials-${old_num}-${email}.json"
+                if [[ -f "$old_cred" ]]; then
+                    mv "$old_cred" "$BACKUP_DIR/credentials/.claude-credentials-tmp-${old_num}-${email}.json"
+                fi
+                ;;
+        esac
+        local old_conf="$BACKUP_DIR/configs/.claude-config-${old_num}-${email}.json"
+        if [[ -f "$old_conf" ]]; then
+            mv "$old_conf" "$BACKUP_DIR/configs/.claude-config-tmp-${old_num}-${email}.json"
+        fi
+    done
+
+    # Pass 2: rename from temp to new names
+    for old_num in "${!num_map[@]}"; do
+        local new_num=${num_map[$old_num]}
+        [[ "$old_num" == "$new_num" ]] && continue
+
+        local email
+        email=$(jq -r --arg n "$old_num" '.accounts[$n].email' "$SEQUENCE_FILE")
+
+        case "$platform" in
+            macos)
+                local creds
+                creds=$(security find-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" -w 2>/dev/null || echo "")
+                if [[ -n "$creds" ]]; then
+                    security add-generic-password -U -s "Claude Code-Account-${new_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null
+                    security delete-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" 2>/dev/null || true
+                fi
+                ;;
+            linux|wsl)
+                local tmp_cred="$BACKUP_DIR/credentials/.claude-credentials-tmp-${old_num}-${email}.json"
+                if [[ -f "$tmp_cred" ]]; then
+                    mv "$tmp_cred" "$BACKUP_DIR/credentials/.claude-credentials-${new_num}-${email}.json"
+                fi
+                ;;
+        esac
+        local tmp_conf="$BACKUP_DIR/configs/.claude-config-tmp-${old_num}-${email}.json"
+        if [[ -f "$tmp_conf" ]]; then
+            mv "$tmp_conf" "$BACKUP_DIR/configs/.claude-config-${new_num}-${email}.json"
+        fi
+    done
+
+    # Write the pre-validated sequence.json
+    write_json "$SEQUENCE_FILE" "$updated_sequence"
+    invalidate_cache
+    complete_progress
+
+    # Show new state
+    echo "After:"
+    local new_account_nums
+    new_account_nums=$(jq -r '.sequence | sort | map(tostring) | .[]' "$SEQUENCE_FILE")
+    while IFS= read -r num; do
+        local email alias_name
+        email=$(jq -r --arg n "$num" '.accounts[$n].email' "$SEQUENCE_FILE")
+        alias_name=$(jq -r --arg n "$num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE")
+        local label="$email"
+        [[ -n "$alias_name" ]] && label="$email [$alias_name]"
+        local marker=""
+        [[ "$num" == "$new_active" ]] && marker=" ${COLOR_GREEN}(active)${COLOR_RESET}"
+        echo -e "  $num: $label$marker"
+    done <<< "$new_account_nums"
+    echo ""
+    log_success "Accounts reordered successfully."
+}
+
+# Purpose: Binds a project directory to a specific account for auto-switching
+# Parameters: [project-path] <account_identifier> OR "list" to show bindings
+# Returns: 0 on success, 1 on failure
+# Usage: cmd_bind . work | cmd_bind ~/project 2 | cmd_bind list
+cmd_bind() {
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_error "No accounts are managed yet."
+        exit 1
+    fi
+
+    migrate_sequence_file
+
+    # Handle "bind list"
+    if [[ "${1:-}" == "list" ]]; then
+        local bindings
+        bindings=$(jq -r '.bindings // {} | to_entries[] | "\(.key)|\(.value)"' "$SEQUENCE_FILE" 2>/dev/null)
+
+        echo -e "${COLOR_BOLD}Project Bindings:${COLOR_RESET}"
+        echo ""
+
+        if [[ -z "$bindings" ]]; then
+            log_info "No project bindings configured."
+            echo "Use 'ccm bind <path> <account>' to create one."
+            return 0
+        fi
+
+        printf "  %-45s  %s\n" "Project" "Account"
+        printf "  %-45s  %s\n" "-------" "-------"
+        while IFS='|' read -r path account_num; do
+            [[ -z "$path" ]] && continue
+            local display_path
+            display_path=$(truncate_path "$path")
+            [[ ${#display_path} -gt 45 ]] && display_path="...${display_path: -42}"
+            local email
+            email=$(jq -r --arg n "$account_num" '.accounts[$n].email // "unknown"' "$SEQUENCE_FILE")
+            local alias_name
+            alias_name=$(jq -r --arg n "$account_num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE")
+            local account_label="$account_num: $email"
+            [[ -n "$alias_name" ]] && account_label="$account_num: $email [$alias_name]"
+            printf "  %-45s  %s\n" "$display_path" "$account_label"
+        done <<< "$bindings"
+        return 0
+    fi
+
+    # Parse arguments: [path] <account>
+    local project_path account_identifier
+    if [[ $# -lt 1 ]]; then
+        log_error "Usage: ccm bind [project-path] <account_number|email|alias>"
+        echo "       ccm bind list"
+        exit 1
+    elif [[ $# -eq 1 ]]; then
+        project_path="."
+        account_identifier="$1"
+    else
+        project_path="$1"
+        account_identifier="$2"
+    fi
+
+    # Resolve project path to absolute
+    local abs_path
+    abs_path=$(cd "$project_path" 2>/dev/null && pwd)
+    if [[ -z "$abs_path" ]]; then
+        log_error "Directory not found: $project_path"
+        exit 1
+    fi
+
+    # Resolve account
+    local account_num
+    account_num=$(resolve_account_identifier "$account_identifier")
+    if [[ -z "$account_num" ]]; then
+        log_error "No account found matching: $account_identifier"
+        exit 1
+    fi
+
+    local email
+    email=$(jq -r --arg n "$account_num" '.accounts[$n].email' "$SEQUENCE_FILE")
+
+    # Update bindings
+    local updated_sequence
+    updated_sequence=$(jq --arg path "$abs_path" --arg num "$account_num" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        .bindings[$path] = ($num | tonumber | tostring) |
+        .lastUpdated = $now
+    ' "$SEQUENCE_FILE")
+
+    write_json "$SEQUENCE_FILE" "$updated_sequence"
+    invalidate_cache
+
+    local display_path
+    display_path=$(truncate_path "$abs_path")
+    log_success "Bound $display_path → Account-$account_num ($email)"
+    echo "  Running 'ccm switch' in this directory will auto-switch to this account."
+}
+
+# Purpose: Removes a project-to-account binding
+# Parameters: [project-path] (default: current directory)
+# Returns: 0 on success, 1 on failure
+# Usage: cmd_unbind | cmd_unbind ~/project
+cmd_unbind() {
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_error "No accounts are managed yet."
+        exit 1
+    fi
+
+    migrate_sequence_file
+
+    local project_path="${1:-.}"
+    local abs_path
+    abs_path=$(cd "$project_path" 2>/dev/null && pwd)
+    if [[ -z "$abs_path" ]]; then
+        log_error "Directory not found: $project_path"
+        exit 1
+    fi
+
+    # Check if binding exists
+    local existing
+    existing=$(jq -r --arg path "$abs_path" '.bindings[$path] // empty' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -z "$existing" ]]; then
+        local display_path
+        display_path=$(truncate_path "$abs_path")
+        log_info "No binding found for $display_path"
+        return 0
+    fi
+
+    local updated_sequence
+    updated_sequence=$(jq --arg path "$abs_path" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+        del(.bindings[$path]) |
+        .lastUpdated = $now
+    ' "$SEQUENCE_FILE")
+
+    write_json "$SEQUENCE_FILE" "$updated_sequence"
+    invalidate_cache
+
+    local display_path
+    display_path=$(truncate_path "$abs_path")
+    log_success "Removed binding for $display_path"
 }
 
 # Export accounts to encrypted archive
@@ -2330,10 +2838,10 @@ show_help() {
             echo ""
             echo "Usage: ccm doctor [--fix]"
             echo ""
-            echo "Scans ~/.claude/ for health issues including stale lock files,"
-            echo "debug log bloat, plugin cache size, telemetry accumulation,"
-            echo "todo accumulation, paste cache, file history, shell snapshots,"
-            echo "and orphaned sessions."
+            echo "Scans ~/.claude/ for health issues including stale locks, debug logs,"
+            echo "plugin cache, telemetry, todos, paste cache, file history, shell"
+            echo "snapshots, orphaned sessions, total disk size, tmp output files,"
+            echo "orphaned processes, and hook async configuration."
             echo ""
             echo -e "${COLOR_BOLD}Options:${COLOR_RESET}"
             echo "  --fix     Auto-fix safe issues (remove old logs, stale locks, etc.)"
@@ -2353,12 +2861,16 @@ show_help() {
             echo "  telemetry                Remove all telemetry files"
             echo "  todos [--days N]         Remove todo files older than N days (default: 30)"
             echo "  history [--keep N]       Trim history.jsonl to last N entries (default: 1000)"
+            echo "  tmp [--days N]           Remove tmp output files older than N days (default: 1)"
+            echo "  processes                Kill orphaned Claude subagent processes"
             echo "  all [--dry-run]          Run all clean targets"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
             echo "  ccm clean debug --days 7"
             echo "  ccm clean telemetry"
             echo "  ccm clean history --keep 500"
+            echo "  ccm clean tmp --days 3"
+            echo "  ccm clean processes"
             echo "  ccm clean all --dry-run"
             echo "  ccm clean all"
             ;;
@@ -2392,6 +2904,7 @@ show_help() {
             echo "  info <project-path>      Show detailed info for a project's sessions"
             echo "  relocate <old> <new>     Relocate project sessions after moving a folder"
             echo "  clean [--dry-run]        Remove orphaned sessions (projects no longer on disk)"
+            echo "  search <query> [--limit N]  Full-text search across sessions (default: 10)"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
             echo "  ccm session list"
@@ -2400,6 +2913,8 @@ show_help() {
             echo "  ccm session relocate ~/old/project ~/new/project"
             echo "  ccm session clean --dry-run"
             echo "  ccm session clean"
+            echo "  ccm session search 'error handling'"
+            echo "  ccm session search 'API' --limit 5"
             ;;
         env)
             echo -e "${COLOR_BOLD}ccm env — Environment Management${COLOR_RESET}"
@@ -2428,11 +2943,16 @@ show_help() {
             echo -e "${COLOR_BOLD}Subcommands:${COLOR_RESET}"
             echo "  summary                  Show usage summary (projects, sessions, disk)"
             echo "  top [--count N]          Show top N projects by disk usage (default: 10)"
+            echo "  history [--days N] [--project <path>]"
+            echo "                           Token usage breakdown by project and day (default: 7)"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
             echo "  ccm usage summary"
             echo "  ccm usage top"
             echo "  ccm usage top --count 5"
+            echo "  ccm usage history"
+            echo "  ccm usage history --days 30"
+            echo "  ccm usage history --project ~/my-app"
             ;;
         *)
             echo -e "${COLOR_GREEN}"
@@ -2453,9 +2973,13 @@ show_help() {
             echo "  list                               List all managed accounts"
             echo "  status                             Show active account details"
             echo "  alias <num|email> <alias>          Set friendly name for an account"
+            echo "  reorder <from> <to>                Reorder account positions"
             echo ""
             echo -e "${COLOR_BOLD}Switching:${COLOR_RESET}"
-            echo "  switch [num|email|alias]           Switch account (next or specific)"
+            echo "  switch [num|email|alias]           Switch account (next, specific, or project-bound)"
+            echo "  bind [path] <account>              Bind project directory to an account"
+            echo "  unbind [path]                      Remove project binding"
+            echo "  bind list                          Show all project bindings"
             echo "  undo                               Undo last account switch"
             echo "  history                            Show account switch history"
             echo ""
@@ -2471,7 +2995,7 @@ show_help() {
             echo ""
             echo -e "${COLOR_BOLD}Maintenance:${COLOR_RESET}"
             echo "  doctor [--fix]                         Diagnose and fix Claude Code health issues"
-            echo "  clean <target> [--dry-run]             Clean up cache, logs, telemetry, todos, history"
+            echo "  clean <target> [--dry-run]             Clean up cache, logs, telemetry, tmp, processes"
             echo "  optimize                               Analyze and optimize token usage"
             echo ""
             echo -e "${COLOR_BOLD}Other:${COLOR_RESET}"
@@ -2487,10 +3011,12 @@ show_help() {
             echo "  ccm switch user@example.com"
             echo "  ccm list"
             echo "  ccm verify"
-            echo "  ccm export ~/accounts-backup.tar.gz"
-            echo "  ccm history"
-            echo "  ccm undo"
-            echo "  ccm session relocate ~/old/path ~/new/path"
+            echo "  ccm reorder 3 1"
+            echo "  ccm bind . work"
+            echo "  ccm bind list"
+            echo "  ccm usage history --days 30"
+            echo "  ccm session search 'error handling'"
+            echo "  ccm clean tmp"
             echo "  ccm help session"
             ;;
     esac
@@ -2870,6 +3396,7 @@ cmd_usage() {
     case "${1:-}" in
         summary)    usage_summary ;;
         top)        shift; usage_top "$@" ;;
+        history)    shift; usage_history "$@" ;;
         "")         show_help usage ;;
         *)          log_error "Unknown usage command '$1'"; show_help usage; exit 1 ;;
     esac
@@ -3061,6 +3588,160 @@ usage_top() {
     done <<< "$sorted"
 
     echo ""
+}
+
+# Purpose: Displays per-project and per-day token usage by parsing JSONL session files
+# Parameters: [--days N] [--project <path>]
+# Returns: 0 on success
+# Usage: usage_history | usage_history --days 30 | usage_history --project ~/my-app
+usage_history() {
+    local days=7
+    local filter_project=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days)    days="$2"; shift 2 ;;
+            --project) filter_project="$2"; shift 2 ;;
+            *)         log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    if ! [[ "$days" =~ ^[0-9]+$ ]] || [[ "$days" -eq 0 ]]; then
+        log_error "--days must be a positive integer."
+        return 1
+    fi
+
+    if [[ ! -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        log_error "Claude Code projects directory not found: $CLAUDE_PROJECTS_DIR"
+        return 1
+    fi
+
+    local platform
+    platform=$(detect_platform)
+    local cutoff_date
+    case "$platform" in
+        macos) cutoff_date=$(date -v-"${days}"d +%Y-%m-%d) ;;
+        *)     cutoff_date=$(date -d "-${days} days" +%Y-%m-%d) ;;
+    esac
+
+    echo -e "${COLOR_BOLD}Token Usage History (last $days days)${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}"
+    echo ""
+
+    show_progress "Scanning session files"
+
+    local project_data=()
+    local grand_input=0 grand_output=0 grand_cache_create=0 grand_cache_read=0
+    declare -A day_input day_output day_cache_create day_cache_read
+
+    for project_dir in "$CLAUDE_PROJECTS_DIR"/*/; do
+        [[ -d "$project_dir" ]] || continue
+
+        local dirname
+        dirname=$(basename "$project_dir")
+        local decoded_path
+        decoded_path=$(decode_project_path "$dirname")
+
+        if [[ -n "$filter_project" ]]; then
+            local abs_filter
+            abs_filter=$(cd "$filter_project" 2>/dev/null && pwd || echo "$filter_project")
+            [[ "$decoded_path" != "$abs_filter" ]] && continue
+        fi
+
+        local proj_input=0 proj_output=0 proj_cache_create=0 proj_cache_read=0
+
+        while IFS= read -r -d '' jsonl_file; do
+            # Single jq pass per file — extract usage from assistant messages within date range
+            local result
+            result=$(jq -r --arg cutoff "$cutoff_date" '
+                select(.type == "assistant" and .message.usage != null)
+                | select(.timestamp != null and (.timestamp[:10]) >= $cutoff)
+                | "\(.timestamp[:10])|\(.message.usage.input_tokens // 0)|\(.message.usage.output_tokens // 0)|\(.message.usage.cache_creation_input_tokens // 0)|\(.message.usage.cache_read_input_tokens // 0)"
+            ' "$jsonl_file" 2>/dev/null) || continue
+
+            while IFS='|' read -r date input output cache_create cache_read; do
+                [[ -z "$date" || "$date" == "null" ]] && continue
+                proj_input=$((proj_input + input))
+                proj_output=$((proj_output + output))
+                proj_cache_create=$((proj_cache_create + cache_create))
+                proj_cache_read=$((proj_cache_read + cache_read))
+
+                day_input[$date]=$(( ${day_input[$date]:-0} + input ))
+                day_output[$date]=$(( ${day_output[$date]:-0} + output ))
+                day_cache_create[$date]=$(( ${day_cache_create[$date]:-0} + cache_create ))
+                day_cache_read[$date]=$(( ${day_cache_read[$date]:-0} + cache_read ))
+            done <<< "$result"
+        done < <(find "$project_dir" -maxdepth 2 -name "*.jsonl" -print0 2>/dev/null)
+
+        local proj_total=$((proj_input + proj_output + proj_cache_create + proj_cache_read))
+        if [[ "$proj_total" -gt 0 ]]; then
+            project_data+=("${proj_total}|${proj_input}|${proj_output}|${proj_cache_create}|${proj_cache_read}|${decoded_path}")
+            grand_input=$((grand_input + proj_input))
+            grand_output=$((grand_output + proj_output))
+            grand_cache_create=$((grand_cache_create + proj_cache_create))
+            grand_cache_read=$((grand_cache_read + proj_cache_read))
+        fi
+    done
+
+    complete_progress
+
+    local grand_total=$((grand_input + grand_output + grand_cache_create + grand_cache_read))
+    if [[ "$grand_total" -eq 0 ]]; then
+        log_info "No token usage data found for the last $days days."
+        return 0
+    fi
+
+    # Per-project table (sorted by total descending)
+    echo -e "${COLOR_BOLD}Per-Project Breakdown:${COLOR_RESET}"
+    echo ""
+    printf "  %-40s %12s %12s %12s\n" "Project" "Input" "Output" "Total"
+    printf "  %-40s %12s %12s %12s\n" "-------" "-----" "------" "-----"
+
+    local sorted
+    sorted=$(printf '%s\n' "${project_data[@]}" | sort -t'|' -k1 -nr)
+
+    while IFS='|' read -r total input output cache_create cache_read path; do
+        [[ -z "$total" ]] && continue
+        local display_path
+        display_path=$(truncate_path "$path")
+        [[ ${#display_path} -gt 40 ]] && display_path="...${display_path: -37}"
+        local combined_input=$((input + cache_create + cache_read))
+        printf "  %-40s %12s %12s %12s\n" "$display_path" \
+            "$(printf '%'\''d' "$combined_input" 2>/dev/null || echo "$combined_input")" \
+            "$(printf '%'\''d' "$output" 2>/dev/null || echo "$output")" \
+            "$(printf '%'\''d' "$total" 2>/dev/null || echo "$total")"
+    done <<< "$sorted"
+
+    echo ""
+
+    # Per-day table (sorted by date)
+    echo -e "${COLOR_BOLD}Per-Day Breakdown:${COLOR_RESET}"
+    echo ""
+    printf "  %-12s %12s %12s %12s\n" "Date" "Input" "Output" "Total"
+    printf "  %-12s %12s %12s %12s\n" "----" "-----" "------" "-----"
+
+    for date in $(echo "${!day_input[@]}" | tr ' ' '\n' | sort); do
+        local di=${day_input[$date]:-0}
+        local do_val=${day_output[$date]:-0}
+        local dc=${day_cache_create[$date]:-0}
+        local dr=${day_cache_read[$date]:-0}
+        local dt=$((di + do_val + dc + dr))
+        local combined_in=$((di + dc + dr))
+        printf "  %-12s %12s %12s %12s\n" "$date" \
+            "$(printf '%'\''d' "$combined_in" 2>/dev/null || echo "$combined_in")" \
+            "$(printf '%'\''d' "$do_val" 2>/dev/null || echo "$do_val")" \
+            "$(printf '%'\''d' "$dt" 2>/dev/null || echo "$dt")"
+    done
+
+    echo ""
+
+    # Grand totals
+    echo -e "${COLOR_BOLD}Totals:${COLOR_RESET}"
+    printf "  Input tokens:          %s\n" "$(printf '%'\''d' "$grand_input" 2>/dev/null || echo "$grand_input")"
+    printf "  Output tokens:         %s\n" "$(printf '%'\''d' "$grand_output" 2>/dev/null || echo "$grand_output")"
+    printf "  Cache write tokens:    %s\n" "$(printf '%'\''d' "$grand_cache_create" 2>/dev/null || echo "$grand_cache_create")"
+    printf "  Cache read tokens:     %s\n" "$(printf '%'\''d' "$grand_cache_read" 2>/dev/null || echo "$grand_cache_read")"
+    printf "  ${COLOR_BOLD}Grand total:           %s${COLOR_RESET}\n" "$(printf '%'\''d' "$grand_total" 2>/dev/null || echo "$grand_total")"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -3318,15 +3999,14 @@ doctor_scan() {
         printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Shell snapshots" "$snapshot_count files ($snapshot_old older than 30 days)"
         issues=$((issues + 1))
         if [[ "$fix_mode" -eq 1 ]] && [[ -d "$snapshot_dir" ]]; then
-            # Keep the 50 most recent, remove the rest
-            local to_remove
-            to_remove=$(find "$snapshot_dir" -type f 2>/dev/null | xargs ls -t 2>/dev/null | tail -n +51)
+            # Remove oldest files beyond the 50 most recent (snapshot dirs use UUID names)
             local removed=0
             while IFS= read -r f; do
                 [[ -n "$f" ]] || continue
                 rm -f "$f"
                 removed=$((removed + 1))
-            done <<< "$to_remove"
+            done < <(find "$snapshot_dir" -type f -print0 2>/dev/null \
+                | xargs -0 ls -1t 2>/dev/null | tail -n +51)
             log_step "  Removed $removed old shell snapshots, kept 50 most recent"
         fi
     else
@@ -3359,6 +4039,92 @@ doctor_scan() {
         printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Orphaned sessions" "No orphaned sessions found"
     fi
 
+    # 10. Total ~/.claude/ size
+    local claude_total_size
+    claude_total_size=$(doctor_dir_size "$HOME/.claude")
+    local claude_total_gb=$((claude_total_size / 1073741824))
+    if [[ "$claude_total_gb" -ge 5 ]]; then
+        printf "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} %-24s %s\n" "Total ~/.claude size" "$(format_size "$claude_total_size") — CRITICAL (>5 GB)"
+        issues=$((issues + 1))
+    elif [[ "$claude_total_gb" -ge 1 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Total ~/.claude size" "$(format_size "$claude_total_size") — consider cleanup"
+        issues=$((issues + 1))
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Total ~/.claude size" "$(format_size "$claude_total_size")"
+    fi
+
+    # 11. Tmp output files
+    local uid
+    uid=$(id -u)
+    local tmp_base
+    case "$(detect_platform)" in
+        macos) tmp_base="/private/tmp/claude-${uid}" ;;
+        *)     tmp_base="/tmp/claude-${uid}" ;;
+    esac
+    if [[ -d "$tmp_base" ]]; then
+        local tmp_size
+        tmp_size=$(doctor_dir_size "$tmp_base")
+        local tmp_count
+        tmp_count=$(doctor_count_files "$tmp_base")
+        local tmp_old
+        tmp_old=$(doctor_count_old_files "$tmp_base" 1)
+        if [[ "$tmp_old" -gt 0 ]]; then
+            printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Tmp output files" "$(format_size "$tmp_size") ($tmp_count files, $tmp_old older than 1 day)"
+            issues=$((issues + 1))
+            recoverable_bytes=$((recoverable_bytes + tmp_size))
+            if [[ "$fix_mode" -eq 1 ]]; then
+                find "$tmp_base" -type f -mtime +1 -delete 2>/dev/null
+                find "$tmp_base" -type d -empty -delete 2>/dev/null
+                local tmp_new_size
+                tmp_new_size=$(doctor_dir_size "$tmp_base")
+                local tmp_freed=$((tmp_size - tmp_new_size))
+                log_step "  Removed $tmp_old old tmp file(s), freed $(format_size "$tmp_freed")"
+            fi
+        else
+            printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Tmp output files" "$(format_size "$tmp_size") ($tmp_count files)"
+        fi
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Tmp output files" "No directory found"
+    fi
+
+    # 12. Orphaned Claude processes (macOS only — ppid=1 is unreliable on Linux/WSL)
+    local oproc_count=0
+    local oproc_rss=0
+    if [[ "$(detect_platform)" == "macos" ]]; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local o_ppid o_rss o_cmd
+            o_ppid=$(echo "$line" | awk '{print $2}')
+            o_rss=$(echo "$line" | awk '{print $3}')
+            o_cmd=$(echo "$line" | awk '{$1=$2=$3=""; print $0}')
+            [[ "$o_cmd" == *"Claude.app"* || "$o_cmd" == *"Claude Helper"* || "$o_cmd" == *"/Applications/"* ]] && continue
+            if [[ "$o_ppid" -eq 1 ]]; then
+                oproc_count=$((oproc_count + 1))
+                oproc_rss=$((oproc_rss + o_rss))
+            fi
+        done < <(ps -eo pid,ppid,rss,command 2>/dev/null | grep -i "[c]laude" | grep -v "Claude.app" | grep -v "Claude Helper")
+    fi
+    if [[ "$oproc_count" -gt 0 ]]; then
+        local oproc_mb=$((oproc_rss / 1024))
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Orphaned processes" "$oproc_count process(es), ~${oproc_mb}MB (run 'ccm clean processes')"
+        issues=$((issues + 1))
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Orphaned processes" "None detected"
+    fi
+
+    # 13. Hook async audit
+    local settings_file="$HOME/.claude/settings.json"
+    local non_async_hooks=0
+    if [[ -f "$settings_file" ]]; then
+        non_async_hooks=$(jq '[.hooks // {} | to_entries[] | .value[] | select(.command != null and (.async // false) == false)] | length' "$settings_file" 2>/dev/null || echo "0")
+    fi
+    if [[ "$non_async_hooks" -gt 0 ]]; then
+        printf "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} %-24s %s\n" "Hook async config" "$non_async_hooks hook(s) without async — may slow startup"
+        issues=$((issues + 1))
+    else
+        printf "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} %-24s %s\n" "Hook async config" "All hooks properly configured"
+    fi
+
     # Summary
     echo ""
     if [[ "$issues" -eq 0 ]]; then
@@ -3386,6 +4152,8 @@ cmd_clean() {
         telemetry)  clean_telemetry ;;
         todos)      shift; clean_todos "$@" ;;
         history)    shift; clean_history "$@" ;;
+        tmp)        shift; clean_tmp "$@" ;;
+        processes)  clean_processes ;;
         all)        shift; clean_all "$@" ;;
         "")         show_help clean ;;
         *)          log_error "Unknown clean target '$1'"; show_help clean; exit 1 ;;
@@ -3450,6 +4218,11 @@ clean_debug() {
             *)      log_error "Unknown option '$1'"; return 1 ;;
         esac
     done
+
+    if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+        log_error "--days must be a non-negative integer."
+        return 1
+    fi
 
     local debug_dir="$HOME/.claude/debug"
     if [[ ! -d "$debug_dir" ]]; then
@@ -3542,6 +4315,11 @@ clean_todos() {
         esac
     done
 
+    if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+        log_error "--days must be a non-negative integer."
+        return 1
+    fi
+
     local todo_dir="$HOME/.claude/todos"
     if [[ ! -d "$todo_dir" ]]; then
         log_info "Todos directory not found. Nothing to clean."
@@ -3626,6 +4404,154 @@ clean_history() {
     tail -n "$keep" "$history_file" > "$temp_file"
     mv "$temp_file" "$history_file"
     log_success "Removed $to_remove history entries, kept last $keep"
+}
+
+# Purpose: Removes orphaned subagent output files from Claude tmp directory
+# Parameters: --days N (default 1) — only remove files older than N days
+# Returns: 0 on success
+# Usage: clean_tmp | clean_tmp --days 3
+clean_tmp() {
+    local days=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days) days="$2"; shift 2 ;;
+            *)      log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+        log_error "--days must be a non-negative integer."
+        return 1
+    fi
+
+    local platform
+    platform=$(detect_platform)
+    local uid
+    uid=$(id -u)
+    local tmp_base
+    case "$platform" in
+        macos) tmp_base="/private/tmp/claude-${uid}" ;;
+        *)     tmp_base="/tmp/claude-${uid}" ;;
+    esac
+
+    echo -e "${COLOR_BOLD}Tmp File Cleanup${COLOR_RESET}"
+    echo ""
+
+    if [[ ! -d "$tmp_base" ]]; then
+        log_info "Claude tmp directory not found: $tmp_base"
+        return 0
+    fi
+
+    local size_before
+    size_before=$(doctor_dir_size "$tmp_base")
+    local total_files
+    total_files=$(find "$tmp_base" -type f 2>/dev/null | wc -l | tr -d ' ')
+    local old_files
+    old_files=$(doctor_count_old_files "$tmp_base" "$days")
+
+    echo "  Directory:  $tmp_base"
+    echo "  Total size: $(format_size "$size_before")"
+    echo "  Files:      $total_files total, $old_files older than $days day(s)"
+
+    if [[ "$old_files" -eq 0 ]]; then
+        echo ""
+        log_success "No tmp files older than $days day(s)"
+        return 0
+    fi
+
+    echo ""
+    echo -n "Remove $old_files file(s) older than $days day(s)? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    find "$tmp_base" -type f -mtime +"$days" -delete 2>/dev/null
+    find "$tmp_base" -type d -empty -delete 2>/dev/null
+
+    local size_after
+    size_after=$(doctor_dir_size "$tmp_base")
+    local freed=$((size_before - size_after))
+    log_success "Removed $old_files file(s), freed $(format_size "$freed")"
+}
+
+# Purpose: Detects and kills orphaned Claude Code subagent processes
+# Parameters: None
+# Returns: 0 on success
+# Usage: clean_processes
+clean_processes() {
+    echo -e "${COLOR_BOLD}Orphaned Process Cleanup${COLOR_RESET}"
+    echo ""
+
+    local platform
+    platform=$(detect_platform)
+
+    # PPID=1 orphan detection is only reliable on macOS (launchd).
+    # On Linux/WSL, systemd children legitimately have ppid=1.
+    if [[ "$platform" != "macos" ]]; then
+        log_info "Orphaned process detection is only supported on macOS."
+        return 0
+    fi
+
+    local orphan_pids=()
+    local orphan_info=()
+    local total_rss=0
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local pid ppid rss cmd
+        pid=$(echo "$line" | awk '{print $1}')
+        ppid=$(echo "$line" | awk '{print $2}')
+        rss=$(echo "$line" | awk '{print $3}')
+        cmd=$(echo "$line" | awk '{$1=$2=$3=""; print $0}' | sed 's/^  *//')
+
+        # Skip Claude Desktop app processes
+        [[ "$cmd" == *"Claude.app"* ]] && continue
+        [[ "$cmd" == *"Claude Helper"* ]] && continue
+        [[ "$cmd" == *"/Applications/"* ]] && continue
+
+        # Validate PID is numeric
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+
+        # Orphaned = parent PID is 1 (reparented to launchd on macOS)
+        if [[ "$ppid" -eq 1 ]]; then
+            orphan_pids+=("$pid")
+            local mem_mb=$((rss / 1024))
+            total_rss=$((total_rss + rss))
+            orphan_info+=("${pid}|${mem_mb}MB|${cmd}")
+        fi
+    done < <(ps -eo pid,ppid,rss,command 2>/dev/null | grep -i "[c]laude" | grep -v "Claude.app" | grep -v "Claude Helper")
+
+    if [[ ${#orphan_pids[@]} -eq 0 ]]; then
+        log_success "No orphaned Claude processes found."
+        return 0
+    fi
+
+    local total_mem_mb=$((total_rss / 1024))
+    printf "  %-8s  %-8s  %s\n" "PID" "Memory" "Command"
+    printf "  %-8s  %-8s  %s\n" "--------" "--------" "-------"
+    for info in "${orphan_info[@]}"; do
+        IFS='|' read -r pid mem cmd <<< "$info"
+        local short_cmd="${cmd:0:60}"
+        printf "  %-8s  %-8s  %s\n" "$pid" "$mem" "$short_cmd"
+    done
+    echo ""
+    echo "  Total: ${#orphan_pids[@]} orphaned process(es), ~${total_mem_mb}MB memory"
+
+    echo ""
+    echo -n "Kill ${#orphan_pids[@]} orphaned process(es)? (y/N): "
+    read -r confirm
+    if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
+        log_info "Clean cancelled."
+        return 0
+    fi
+
+    local killed=0
+    for pid in "${orphan_pids[@]}"; do
+        kill "$pid" 2>/dev/null && killed=$((killed + 1))
+    done
+    log_success "Killed $killed orphaned process(es), freed ~${total_mem_mb}MB memory"
 }
 
 # Purpose: Runs all clean targets with optional dry-run mode
@@ -3735,6 +4661,62 @@ clean_all() {
         echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} History: no file found"
     fi
 
+    # Tmp output files (1 day)
+    local uid
+    uid=$(id -u)
+    local tmp_base
+    case "$(detect_platform)" in
+        macos) tmp_base="/private/tmp/claude-${uid}" ;;
+        *)     tmp_base="/tmp/claude-${uid}" ;;
+    esac
+    if [[ -d "$tmp_base" ]]; then
+        local tmp_old
+        tmp_old=$(doctor_count_old_files "$tmp_base" 1)
+        local tmp_size
+        tmp_size=$(doctor_dir_size "$tmp_base")
+        if [[ "$tmp_old" -gt 0 ]]; then
+            echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Tmp output files: $tmp_old files older than 1 day ($(format_size "$tmp_size") total)"
+            if [[ "$dry_run" -eq 0 ]]; then
+                local tmp_before=$tmp_size
+                find "$tmp_base" -type f -mtime +1 -delete 2>/dev/null
+                find "$tmp_base" -type d -empty -delete 2>/dev/null
+                local tmp_after
+                tmp_after=$(doctor_dir_size "$tmp_base")
+                local tmp_freed=$((tmp_before - tmp_after))
+                total_freed=$((total_freed + tmp_freed))
+                log_step "  Removed $tmp_old old tmp file(s), freed $(format_size "$tmp_freed")"
+            fi
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Tmp output files: clean"
+        fi
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Tmp output files: no directory found"
+    fi
+
+    # Orphaned processes (report only — macOS only, ppid=1 unreliable on Linux)
+    local orphan_count=0
+    local orphan_rss=0
+    if [[ "$(detect_platform)" == "macos" ]]; then
+        while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            local pid ppid rss cmd
+            ppid=$(echo "$line" | awk '{print $2}')
+            rss=$(echo "$line" | awk '{print $3}')
+            cmd=$(echo "$line" | awk '{$1=$2=$3=""; print $0}')
+            [[ "$cmd" == *"Claude.app"* || "$cmd" == *"Claude Helper"* || "$cmd" == *"/Applications/"* ]] && continue
+            if [[ "$ppid" -eq 1 ]]; then
+                orphan_count=$((orphan_count + 1))
+                orphan_rss=$((orphan_rss + rss))
+            fi
+        done < <(ps -eo pid,ppid,rss,command 2>/dev/null | grep -i "[c]laude" | grep -v "Claude.app" | grep -v "Claude Helper")
+    fi
+    if [[ "$orphan_count" -gt 0 ]]; then
+        local orphan_mb=$((orphan_rss / 1024))
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Orphaned processes: $orphan_count process(es), ~${orphan_mb}MB (run 'ccm clean processes')"
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Orphaned processes: none"
+    fi
+
     echo ""
     if [[ "$dry_run" -eq 1 ]]; then
         log_info "Dry run — no changes made. Remove --dry-run to execute cleanup."
@@ -3814,7 +4796,7 @@ cmd_optimize() {
 
     # 3. MEMORY.md
     local cwd_encoded
-    cwd_encoded=$(pwd | sed 's|/|%2F|g')
+    cwd_encoded=$(pwd | sed 's|/|-|g')
     local memory_file="$HOME/.claude/projects/$cwd_encoded/memory/MEMORY.md"
     local memory_lines=0
     if [[ -f "$memory_file" ]]; then
@@ -3975,6 +4957,9 @@ main() {
         history)        cmd_history ;;
         export)         shift; cmd_export "$@" ;;
         import)         shift; cmd_import "$@" ;;
+        reorder)        shift; cmd_reorder "$@" ;;
+        bind)           shift; cmd_bind "$@" ;;
+        unbind)         shift; cmd_unbind "$@" ;;
         interactive)    cmd_interactive ;;
         session)        shift; cmd_session "$@" ;;
         env)            shift; cmd_env "$@" ;;
