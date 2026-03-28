@@ -1781,6 +1781,34 @@ cmd_verify() {
 
 # Show account status
 cmd_status() {
+    # --short flag for statusline integration (no colors, single line)
+    if [[ "${1:-}" == "--short" ]]; then
+        if [[ ! -f "$SEQUENCE_FILE" ]]; then
+            echo "no accounts"
+            return 0
+        fi
+        local email
+        email=$(get_current_account)
+        if [[ "$email" == "none" ]]; then
+            echo "no account"
+            return 0
+        fi
+        local account_num
+        account_num=$(jq -r --arg email "$email" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+        if [[ -n "$account_num" ]]; then
+            local alias_name
+            alias_name=$(jq -r --arg n "$account_num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE" 2>/dev/null)
+            if [[ -n "$alias_name" ]]; then
+                echo "$alias_name"
+            else
+                echo "$email"
+            fi
+        else
+            echo "$email"
+        fi
+        return 0
+    fi
+
     if [[ ! -f "$SEQUENCE_FILE" ]]; then
         log_info "No accounts are managed yet."
         exit 0
@@ -3029,6 +3057,23 @@ show_help() {
             echo "  ccm init                 # generate .claudeignore"
             echo "  ccm init --force         # regenerate from scratch"
             ;;
+        statusline)
+            echo -e "${COLOR_BOLD}ccm statusline — Claude Code Status Bar${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm statusline [install|remove]"
+            echo ""
+            echo "Installs a statusline at the bottom of Claude Code showing:"
+            echo "  [model] context% bar | active CCM account | session cost"
+            echo ""
+            echo -e "${COLOR_BOLD}Commands:${COLOR_RESET}"
+            echo "  install              Install and configure the statusline (default)"
+            echo "  remove               Remove statusline script and settings"
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm statusline               # install"
+            echo "  ccm statusline install        # same as above"
+            echo "  ccm statusline remove         # uninstall"
+            ;;
         permissions)
             echo -e "${COLOR_BOLD}ccm permissions — Permission Rules Management${COLOR_RESET}"
             echo ""
@@ -3086,9 +3131,10 @@ show_help() {
             echo "  optimize                               Analyze and optimize token usage"
             echo "  permissions <subcommand>               Audit and fix permission rules"
             echo ""
-            echo -e "${COLOR_BOLD}Launcher:${COLOR_RESET}"
+            echo -e "${COLOR_BOLD}Launcher & Setup:${COLOR_RESET}"
             echo "  launch [auto|yolo|plan|safe]           Launch Claude Code with preset mode + terminal fix"
             echo "  init [--force]                         Generate .claudeignore for this project"
+            echo "  statusline [install|remove]            Install CCM statusline in Claude Code"
             echo ""
             echo -e "${COLOR_BOLD}Other:${COLOR_RESET}"
             echo "  interactive                        Launch interactive menu mode"
@@ -5087,6 +5133,149 @@ cmd_launch() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Statusline Module — Claude Code Status Bar Integration
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Installs or removes the CCM statusline for Claude Code
+# Parameters: $1 — subcommand (install|remove)
+# Returns: 0 on success
+# Usage: cmd_statusline install | cmd_statusline remove
+cmd_statusline() {
+    local action="${1:-install}"
+    local script_path="$HOME/.claude/ccm-statusline.sh"
+    local settings_file="$HOME/.claude/settings.json"
+
+    case "$action" in
+        install)
+            echo -e "${COLOR_BOLD}CCM Statusline Setup${COLOR_RESET}"
+            echo ""
+
+            # Create the statusline script
+            cat > "$script_path" << 'STATUSLINE_EOF'
+#!/usr/bin/env bash
+# CCM Statusline for Claude Code
+# Shows: [model] context% | account | $cost
+
+input=$(cat)
+
+# Extract Claude Code session data
+MODEL=$(echo "$input" | jq -r '.model.display_name // "Claude"' 2>/dev/null)
+PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
+
+# Get active CCM account (cached for 10s to avoid slowdown)
+CACHE_FILE="/tmp/.ccm-statusline-cache"
+CACHE_AGE=10
+NOW=$(date +%s)
+if [[ -f "$CACHE_FILE" ]]; then
+    case "$(uname)" in
+        Darwin) MTIME=$(stat -f %m "$CACHE_FILE" 2>/dev/null || echo "0") ;;
+        *)      MTIME=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo "0") ;;
+    esac
+    AGE=$((NOW - MTIME))
+else
+    AGE=$((CACHE_AGE + 1))
+fi
+
+if [[ "$AGE" -gt "$CACHE_AGE" ]]; then
+    CCM_BIN=$(command -v ccm 2>/dev/null || echo "$HOME/.ccm/bin/ccm")
+    if [[ -x "$CCM_BIN" ]]; then
+        "$CCM_BIN" status --short > "$CACHE_FILE" 2>/dev/null || echo "?" > "$CACHE_FILE"
+    else
+        echo "ccm?" > "$CACHE_FILE"
+    fi
+fi
+ACCOUNT=$(cat "$CACHE_FILE" 2>/dev/null || echo "?")
+
+# Context bar (10 chars)
+PCT_NUM=${PCT:-0}
+FILLED=$((PCT_NUM / 10))
+EMPTY=$((10 - FILLED))
+BAR=""
+for ((i=0; i<FILLED; i++)); do BAR+="▓"; done
+for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
+
+# Colors based on context usage
+if [[ "$PCT_NUM" -ge 90 ]]; then
+    CTX="\033[31m${BAR}\033[0m"
+elif [[ "$PCT_NUM" -ge 70 ]]; then
+    CTX="\033[33m${BAR}\033[0m"
+else
+    CTX="\033[32m${BAR}\033[0m"
+fi
+
+# Format cost
+if command -v awk &>/dev/null; then
+    COST_FMT=$(echo "$COST" | awk '{printf "$%.2f", $1}')
+else
+    COST_FMT="\$$COST"
+fi
+
+echo -e "[$MODEL] ${CTX} ${PCT_NUM}% | \033[36m${ACCOUNT}\033[0m | ${COST_FMT}"
+STATUSLINE_EOF
+
+            chmod +x "$script_path"
+            log_success "Created statusline script: $script_path"
+
+            # Update settings.json to use the statusline
+            if [[ -f "$settings_file" ]]; then
+                local orig_perms
+                orig_perms=$(stat -f '%Lp' "$settings_file" 2>/dev/null || stat -c '%a' "$settings_file" 2>/dev/null || echo "644")
+                local updated
+                updated=$(jq --arg cmd "$script_path" '
+                    .statusLine = {
+                        type: "command",
+                        command: $cmd,
+                        padding: 2
+                    }
+                ' "$settings_file")
+                echo "$updated" > "${settings_file}.tmp" && mv "${settings_file}.tmp" "$settings_file"
+                chmod "$orig_perms" "$settings_file"
+            else
+                mkdir -p "$HOME/.claude"
+                echo "{}" | jq --arg cmd "$script_path" '
+                    .statusLine = {
+                        type: "command",
+                        command: $cmd,
+                        padding: 2
+                    }
+                ' > "$settings_file"
+            fi
+            log_success "Updated settings.json with statusline config"
+
+            echo ""
+            echo "  Restart Claude Code to see the statusline."
+            echo "  Shows: [model] context% | active account | session cost"
+            ;;
+
+        remove)
+            if [[ -f "$script_path" ]]; then
+                rm -f "$script_path"
+                log_success "Removed statusline script"
+            fi
+
+            if [[ -f "$settings_file" ]]; then
+                local orig_perms
+                orig_perms=$(stat -f '%Lp' "$settings_file" 2>/dev/null || stat -c '%a' "$settings_file" 2>/dev/null || echo "644")
+                local updated
+                updated=$(jq 'del(.statusLine)' "$settings_file")
+                echo "$updated" > "${settings_file}.tmp" && mv "${settings_file}.tmp" "$settings_file"
+                chmod "$orig_perms" "$settings_file"
+                log_success "Removed statusline from settings.json"
+            fi
+
+            rm -f "/tmp/.ccm-statusline-cache"
+            echo "  Restart Claude Code to remove the statusline."
+            ;;
+
+        *)
+            log_error "Usage: ccm statusline [install|remove]"
+            return 1
+            ;;
+    esac
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Init Module — Project Setup
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -5464,7 +5653,7 @@ main() {
         switch)         shift; if [[ $# -gt 0 ]]; then cmd_switch_to "$@"; else cmd_switch; fi ;;
         undo)           cmd_undo ;;
         list)           cmd_list ;;
-        status)         cmd_status ;;
+        status)         shift; cmd_status "$@" ;;
         alias)          shift; cmd_set_alias "$@" ;;
         verify)         shift; cmd_verify "$@" ;;
         history)        cmd_history ;;
@@ -5483,6 +5672,7 @@ main() {
         launch)         shift; cmd_launch "$@" ;;
         init)           shift; cmd_init "$@" ;;
         permissions)    shift; cmd_permissions "$@" ;;
+        statusline)     shift; cmd_statusline "$@" ;;
         help)           shift; show_help "$@" ;;
         version)        show_version ;;
         --help)         show_help ;;
