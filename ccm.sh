@@ -5153,27 +5153,75 @@ cmd_statusline() {
             # Create the statusline script
             cat > "$script_path" << 'STATUSLINE_EOF'
 #!/usr/bin/env bash
-# CCM Statusline — compact account display for Claude Code
+# CCM Statusline — compact 2-line display for Claude Code
 
+input=$(cat)
+
+# ── Session data from Claude Code ──
+MODEL=$(echo "$input" | jq -r '.model.display_name // "Claude"' 2>/dev/null)
+PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
+TOKENS=$(echo "$input" | jq -r '.context_window.total_input_tokens // 0' 2>/dev/null)
+COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
+
+# ── CCM account data (direct file read, no ccm dependency) ──
 SEQ="$HOME/.claude-switch-backup/sequence.json"
-ACCT="?"
-
-# Find claude config (primary then fallback)
 CONF="$HOME/.claude/.claude.json"
 [[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
 
+ALIAS="?" EMAIL_SHORT="?" HEALTH="?" TOTAL_ACCTS="?"
 if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
     EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
     if [[ -n "$EMAIL" ]]; then
-        ACCT=$(jq -r --arg e "$EMAIL" '
+        EMAIL_SHORT="$EMAIL"
+        ACCT_DATA=$(jq -r --arg e "$EMAIL" '
             .accounts | to_entries[] | select(.value.email == $e) |
-            if .value.alias then .value.alias else .value.email end
+            "\(.value.alias // "")\t\(.value.healthStatus // "unknown")"
         ' "$SEQ" 2>/dev/null)
-        [[ -z "$ACCT" ]] && ACCT="$EMAIL"
+        if [[ -n "$ACCT_DATA" ]]; then
+            ALIAS=$(echo "$ACCT_DATA" | cut -f1)
+            HEALTH=$(echo "$ACCT_DATA" | cut -f2)
+            [[ -z "$ALIAS" ]] && ALIAS="$EMAIL_SHORT"
+        fi
+        TOTAL_ACCTS=$(jq '.accounts | length' "$SEQ" 2>/dev/null || echo "?")
     fi
 fi
 
-echo -e "\033[36m$ACCT\033[0m"
+# ── Context bar ──
+PCT_NUM=${PCT:-0}
+FILLED=$((PCT_NUM / 10))
+EMPTY=$((10 - FILLED))
+BAR=""
+for ((i=0; i<FILLED; i++)); do BAR+="▓"; done
+for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
+
+# Context color
+if [[ "$PCT_NUM" -ge 90 ]]; then BAR_C="\033[31m"
+elif [[ "$PCT_NUM" -ge 70 ]]; then BAR_C="\033[33m"
+else BAR_C="\033[32m"; fi
+
+# ── Format tokens (K/M) ──
+if [[ "$TOKENS" -ge 1000000 ]]; then
+    TOK_FMT="$(awk "BEGIN{printf \"%.1fM\", $TOKENS/1000000}")"
+elif [[ "$TOKENS" -ge 1000 ]]; then
+    TOK_FMT="$(awk "BEGIN{printf \"%.0fK\", $TOKENS/1000}")"
+else
+    TOK_FMT="${TOKENS}"
+fi
+
+# ── Format cost ──
+COST_FMT=$(awk "BEGIN{printf \"$%.2f\", $COST}" 2>/dev/null || echo "\$$COST")
+
+# ── Health icon ──
+case "$HEALTH" in
+    healthy)  H_ICON="\033[32m●\033[0m" ;;
+    degraded) H_ICON="\033[33m●\033[0m" ;;
+    *)        H_ICON="\033[31m●\033[0m" ;;
+esac
+
+# ── Output: 2 compact lines ──
+R="\033[0m" C="\033[36m" D="\033[90m"
+echo -e "${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT}"
+echo -e "${C}${ALIAS}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H_ICON}"
 STATUSLINE_EOF
 
             chmod +x "$script_path"
