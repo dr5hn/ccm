@@ -5153,65 +5153,27 @@ cmd_statusline() {
             # Create the statusline script
             cat > "$script_path" << 'STATUSLINE_EOF'
 #!/usr/bin/env bash
-# CCM Statusline for Claude Code
-# Shows: [model] context% | account | $cost
+# CCM Statusline — compact account display for Claude Code
 
-input=$(cat)
+SEQ="$HOME/.claude-switch-backup/sequence.json"
+ACCT="?"
 
-# Extract Claude Code session data
-MODEL=$(echo "$input" | jq -r '.model.display_name // "Claude"' 2>/dev/null)
-PCT=$(echo "$input" | jq -r '.context_window.used_percentage // 0' 2>/dev/null | cut -d. -f1)
-COST=$(echo "$input" | jq -r '.cost.total_cost_usd // 0' 2>/dev/null)
+# Find claude config (primary then fallback)
+CONF="$HOME/.claude/.claude.json"
+[[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
 
-# Get active CCM account (cached for 10s to avoid slowdown)
-CACHE_FILE="/tmp/.ccm-statusline-cache"
-CACHE_AGE=10
-NOW=$(date +%s)
-if [[ -f "$CACHE_FILE" ]]; then
-    case "$(uname)" in
-        Darwin) MTIME=$(stat -f %m "$CACHE_FILE" 2>/dev/null || echo "0") ;;
-        *)      MTIME=$(stat -c %Y "$CACHE_FILE" 2>/dev/null || echo "0") ;;
-    esac
-    AGE=$((NOW - MTIME))
-else
-    AGE=$((CACHE_AGE + 1))
-fi
-
-if [[ "$AGE" -gt "$CACHE_AGE" ]]; then
-    CCM_BIN=$(command -v ccm 2>/dev/null || echo "$HOME/.ccm/bin/ccm")
-    if [[ -x "$CCM_BIN" ]]; then
-        "$CCM_BIN" status --short > "$CACHE_FILE" 2>/dev/null || echo "?" > "$CACHE_FILE"
-    else
-        echo "ccm?" > "$CACHE_FILE"
+if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
+    EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
+    if [[ -n "$EMAIL" ]]; then
+        ACCT=$(jq -r --arg e "$EMAIL" '
+            .accounts | to_entries[] | select(.value.email == $e) |
+            if .value.alias then .value.alias else .value.email end
+        ' "$SEQ" 2>/dev/null)
+        [[ -z "$ACCT" ]] && ACCT="$EMAIL"
     fi
 fi
-ACCOUNT=$(cat "$CACHE_FILE" 2>/dev/null || echo "?")
 
-# Context bar (10 chars)
-PCT_NUM=${PCT:-0}
-FILLED=$((PCT_NUM / 10))
-EMPTY=$((10 - FILLED))
-BAR=""
-for ((i=0; i<FILLED; i++)); do BAR+="▓"; done
-for ((i=0; i<EMPTY; i++)); do BAR+="░"; done
-
-# Colors based on context usage
-if [[ "$PCT_NUM" -ge 90 ]]; then
-    CTX="\033[31m${BAR}\033[0m"
-elif [[ "$PCT_NUM" -ge 70 ]]; then
-    CTX="\033[33m${BAR}\033[0m"
-else
-    CTX="\033[32m${BAR}\033[0m"
-fi
-
-# Format cost
-if command -v awk &>/dev/null; then
-    COST_FMT=$(echo "$COST" | awk '{printf "$%.2f", $1}')
-else
-    COST_FMT="\$$COST"
-fi
-
-echo -e "[$MODEL] ${CTX} ${PCT_NUM}% | \033[36m${ACCOUNT}\033[0m | ${COST_FMT}"
+echo -e "\033[36m$ACCT\033[0m"
 STATUSLINE_EOF
 
             chmod +x "$script_path"
@@ -5245,7 +5207,7 @@ STATUSLINE_EOF
 
             echo ""
             echo "  Restart Claude Code to see the statusline."
-            echo "  Shows: [model] context% | active account | session cost"
+            echo "  Shows your active CCM account name in the status bar."
             ;;
 
         remove)
