@@ -7,11 +7,17 @@
  ╚═════╝ ╚═════╝╚═╝     ╚═╝
 ```
 
+[![GitHub stars](https://img.shields.io/github/stars/dr5hn/ccm?style=flat-square&color=38bdf8)](https://github.com/dr5hn/ccm/stargazers) [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE) [![Bash](https://img.shields.io/badge/bash-4.4%2B-blue?style=flat-square)](https://www.gnu.org/software/bash/) [![No Dependencies](https://img.shields.io/badge/dependencies-bash%20%2B%20jq-orange?style=flat-square)](#requirements)
+
 # CCM — Claude Code Manager
 
-> The power-user toolkit for Claude Code
+> The power-user toolkit for Claude Code — manage accounts, sessions, environments, and health from one CLI. No Node, no Python, just bash. Works on macOS, Linux, and WSL.
 
-Manage accounts, sessions, environments, and usage — all from the terminal. Works on macOS, Linux, and WSL.
+## Why CCM?
+
+Claude Code has no built-in multi-account support ([10+ open issues](https://github.com/anthropics/claude-code/issues?q=is%3Aissue+is%3Aopen+multi+account)). Your `~/.claude` directory can grow to [500GB+ without warning](https://github.com/anthropics/claude-code/issues/26911). Your settings.json accumulates dead permission rules you don't know about.
+
+CCM is a single bash script that fixes all of this — and it's the only tool that auto-switches accounts when you `cd` into a project directory.
 
 ## Features
 
@@ -345,6 +351,23 @@ ccm env restore before-experiment  # roll back if needed
 # After moving ~/old-project to ~/new-location/project:
 ccm session relocate ~/old-project ~/new-location/project
 ```
+
+## Ecosystem
+
+CCM focuses on account management, operational health, and environment portability. It works great alongside other Claude Code tools:
+
+| Tool | What it does | Stars |
+|------|-------------|-------|
+| [ccusage](https://github.com/ryoppippi/ccusage) | Detailed token analytics and cost tracking | 12k+ |
+| [ccstatusline](https://github.com/sirmalloc/ccstatusline) | Rich interactive status bar with themes | 6k+ |
+| [ccmanager](https://github.com/kbwo/ccmanager) | Multi-agent session orchestration | 900+ |
+
+**What only CCM does:**
+- Project-to-account bindings with shell hook auto-switch
+- Permissions audit with `--fix` for settings.json
+- `.claudeignore` generation from project type detection
+- Environment snapshots (settings.json + MCP config + CLAUDE.md as a unit)
+- Zero runtime dependencies — single bash script, no package managers needed
 
 ## Security
 

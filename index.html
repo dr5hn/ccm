@@ -896,8 +896,8 @@ body {
 ╚██████╗╚██████╗██║ ╚═╝ ██║
  ╚═════╝ ╚═════╝╚═╝     ╚═╝</pre>
       <div class="hero-badge">★ Open Source · MIT License</div>
-      <h1 class="hero-headline gradient-text">Manage multiple Claude Code accounts from one terminal</h1>
-      <p class="hero-sub">Switch accounts, bind projects, search sessions, track token usage, and clean up disk bloat — all without leaving your workflow.</p>
+      <h1 class="hero-headline gradient-text">The power-user toolkit for Claude Code</h1>
+      <p class="hero-sub">Manage accounts, sessions, health, and permissions — all from one CLI. Auto-switch accounts when you cd. Audit dead permission rules. Clean 500GB of session bloat. No Node, no Python — just bash.</p>
       <div class="hero-ctas">
         <a href="#install" class="btn-primary">Get Started</a>
         <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener" class="btn-secondary">View on GitHub</a>
@@ -930,25 +930,25 @@ body {
   <section class="problem" id="problem">
     <div class="container reveal">
       <div class="section-label">The Problem</div>
-      <h2 class="problem-statement">Claude Code wasn't built for multiple accounts.</h2>
+      <h2 class="problem-statement">Claude Code wasn't built for power users.</h2>
       <div class="pain-points">
         <div class="pain-point">
           <div class="pain-icon">⚙</div>
-          <div class="pain-title">Manual config swaps</div>
-          <div class="pain-desc">Editing ~/.claude/credentials every time you switch contexts</div>
+          <div class="pain-title">No multi-account support</div>
+          <div class="pain-desc">10+ open issues requesting account switching — still not shipped. CCM does it with project bindings.</div>
         </div>
         <div class="pain-point">
           <div class="pain-icon">◎</div>
-          <div class="pain-title">Orphaned sessions</div>
-          <div class="pain-desc">Stale project data silently eating your disk space</div>
+          <div class="pain-title">Unbounded disk growth</div>
+          <div class="pain-desc">~/.claude can grow to 500GB+ from a single session. CCM cleans 9 targets with one command.</div>
         </div>
         <div class="pain-point">
           <div class="pain-icon">◻</div>
-          <div class="pain-title">No visibility</div>
-          <div class="pain-desc">No way to see which account is active or how much space Claude uses</div>
+          <div class="pain-title">Invisible config rot</div>
+          <div class="pain-desc">Dead permission rules, stale locks, orphaned processes — ccm doctor finds them, ccm --fix resolves them.</div>
         </div>
       </div>
-      <p class="problem-transition">CCM fixes all of this with a single command.</p>
+      <p class="problem-transition">CCM fixes all of this — one bash script, zero dependencies beyond bash + jq.</p>
     </div>
   </section>
   <section class="demo" id="demo">
