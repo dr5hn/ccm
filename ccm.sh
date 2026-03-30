@@ -2160,6 +2160,7 @@ cmd_reorder() {
 
     # Now rename credential files (two-pass to avoid collisions)
     # Pass 1: rename to temp names
+    local rename_failed=false
     for old_num in "${!num_map[@]}"; do
         local new_num=${num_map[$old_num]}
         [[ "$old_num" == "$new_num" ]] && continue
@@ -2172,8 +2173,18 @@ cmd_reorder() {
                 local creds
                 creds=$(security find-generic-password -s "Claude Code-Account-${old_num}-${email}" -w 2>/dev/null || echo "")
                 if [[ -n "$creds" ]]; then
-                    security add-generic-password -U -s "Claude Code-Account-tmp-${old_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null
-                    security delete-generic-password -s "Claude Code-Account-${old_num}-${email}" 2>/dev/null || true
+                    if ! security add-generic-password -U -s "Claude Code-Account-tmp-${old_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null; then
+                        log_warning "Failed to create temp Keychain entry for Account-${old_num} (${email})"
+                        rename_failed=true
+                        continue
+                    fi
+                    # Verify temp entry was created before deleting original
+                    if security find-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" -w >/dev/null 2>&1; then
+                        security delete-generic-password -s "Claude Code-Account-${old_num}-${email}" 2>/dev/null || true
+                    else
+                        log_warning "Temp Keychain entry not found after create for Account-${old_num} — keeping original"
+                        rename_failed=true
+                    fi
                 fi
                 ;;
             linux|wsl)
@@ -2189,6 +2200,11 @@ cmd_reorder() {
         fi
     done
 
+    if [[ "$rename_failed" == "true" ]]; then
+        log_warning "Some Keychain renames failed — backup data may be inconsistent with sequence.json"
+        log_warning "Run 'ccm doctor' to check account health"
+    fi
+
     # Pass 2: rename from temp to new names
     for old_num in "${!num_map[@]}"; do
         local new_num=${num_map[$old_num]}
@@ -2202,8 +2218,18 @@ cmd_reorder() {
                 local creds
                 creds=$(security find-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" -w 2>/dev/null || echo "")
                 if [[ -n "$creds" ]]; then
-                    security add-generic-password -U -s "Claude Code-Account-${new_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null
-                    security delete-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" 2>/dev/null || true
+                    if ! security add-generic-password -U -s "Claude Code-Account-${new_num}-${email}" -a "$USER" -w "$creds" 2>/dev/null; then
+                        log_warning "Failed to rename Keychain entry from tmp-${old_num} to Account-${new_num} (${email})"
+                        rename_failed=true
+                        continue
+                    fi
+                    # Verify new entry was created before deleting temp
+                    if security find-generic-password -s "Claude Code-Account-${new_num}-${email}" -w >/dev/null 2>&1; then
+                        security delete-generic-password -s "Claude Code-Account-tmp-${old_num}-${email}" 2>/dev/null || true
+                    else
+                        log_warning "New Keychain entry not found after create for Account-${new_num} — keeping temp entry"
+                        rename_failed=true
+                    fi
                 fi
                 ;;
             linux|wsl)
@@ -2218,6 +2244,10 @@ cmd_reorder() {
             mv "$tmp_conf" "$BACKUP_DIR/configs/.claude-config-${new_num}-${email}.json"
         fi
     done
+
+    if [[ "$rename_failed" == "true" ]]; then
+        log_warning "Reorder completed with warnings — sequence.json updated but some backup data may need manual repair"
+    fi
 
     complete_progress
 
