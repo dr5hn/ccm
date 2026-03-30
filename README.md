@@ -19,6 +19,10 @@ Claude Code has no built-in multi-account support ([10+ open issues](https://git
 
 CCM is a single bash script that fixes all of this — and it's the only tool that auto-switches accounts when you `cd` into a project directory.
 
+<p align="center">
+  <img src="demos/05-hero.gif" alt="CCM Demo — account switching, health checks, cleanup" width="800">
+</p>
+
 ## Features
 
 ### Account Management
@@ -269,6 +273,8 @@ ccm --no-color <command>               # Disable colored output
 
 ### Daily Account Switching
 
+<img src="demos/01-list-and-switch.gif" alt="CCM account switching demo" width="700">
+
 ```bash
 ccm switch work        # switch to work account
 ccm switch personal    # switch back
@@ -321,6 +327,8 @@ ccm session search "API" --limit 5    # limit results
 ```
 
 ### Disk Cleanup
+
+<img src="demos/02-doctor.gif" alt="CCM doctor health check demo" width="700">
 
 ```bash
 ccm doctor             # 13 health checks

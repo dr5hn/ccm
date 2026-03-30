@@ -28,3 +28,7 @@ Thumbs.db
 
 # Superpowers planning artifacts
 docs/
+
+# Demo tape files and mock script (GIFs are tracked)
+demos/*.tape
+demos/ccm-demo
