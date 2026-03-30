@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.3.0"
+readonly CCM_VERSION="3.3.1"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 readonly SCHEMA_VERSION="3.1"
@@ -148,26 +148,58 @@ validate_snapshot_name() {
     [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]
 }
 
+# Account parameter validation for safe file path construction
+# Purpose: Validates account_num is numeric and email is safe for use in file paths
+# Parameters: $1 — account number, $2 — email address
+# Returns: 0 if valid, 1 if invalid (logs error on failure)
+# Usage: validate_account_params "1" "user@example.com" || return 1
+validate_account_params() {
+    local account_num="$1"
+    local email="$2"
+    if [[ ! "$account_num" =~ ^[0-9]+$ ]]; then
+        log_error "Invalid account number: contains non-numeric characters"
+        return 1
+    fi
+    if [[ -n "$email" ]] && ! validate_email "$email"; then
+        log_error "Invalid email format for account parameter"
+        return 1
+    fi
+    return 0
+}
+
 # Account identifier resolution function
 # Resolves account number, email, or alias to account number
 resolve_account_identifier() {
     local identifier="$1"
+    local -a matches=()
+    # Bounds check to prevent DoS via extremely long input
+    if [[ ${#identifier} -gt 255 ]]; then
+        echo ""
+        return 1
+    fi
     if [[ "$identifier" =~ ^[0-9]+$ ]]; then
         echo "$identifier"  # It's a number
     else
         # Try to look up by email first
-        local account_num
-        account_num=$(jq -r --arg email "$identifier" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-        if [[ -n "$account_num" && "$account_num" != "null" ]]; then
-            echo "$account_num"
-            return
+        mapfile -t matches < <(jq -r --arg email "$identifier" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+        if [[ ${#matches[@]} -eq 1 ]] && [[ "${matches[0]}" =~ ^[0-9]+$ ]]; then
+            echo "${matches[0]}"
+            return 0
+        elif [[ ${#matches[@]} -gt 1 ]]; then
+            log_error "Multiple accounts found for email '$identifier'"
+            echo ""
+            return 1
         fi
 
         # Try to look up by alias
-        account_num=$(jq -r --arg alias "$identifier" '.accounts | to_entries[] | select(.value.alias == $alias) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-        if [[ -n "$account_num" && "$account_num" != "null" ]]; then
-            echo "$account_num"
-            return
+        mapfile -t matches < <(jq -r --arg alias "$identifier" '.accounts | to_entries[] | select(.value.alias == $alias) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+        if [[ ${#matches[@]} -eq 1 ]] && [[ "${matches[0]}" =~ ^[0-9]+$ ]]; then
+            echo "${matches[0]}"
+            return 0
+        elif [[ ${#matches[@]} -gt 1 ]]; then
+            log_error "Alias '$identifier' matches multiple accounts. Reassign aliases to make them unique."
+            echo ""
+            return 1
         fi
 
         echo ""
@@ -179,17 +211,20 @@ write_json() {
     local file="$1"
     local content="$2"
     local temp_file
+    local old_umask
+    old_umask=$(umask)
+    umask 077
     temp_file=$(mktemp "${file}.XXXXXX")
-    
+    umask "$old_umask"
+
     echo "$content" > "$temp_file"
     if ! jq . "$temp_file" >/dev/null 2>&1; then
-        rm -f "$temp_file"
+        rm -f -- "$temp_file"
         echo "Error: Generated invalid JSON"
         return 1
     fi
-    
-    mv "$temp_file" "$file"
-    chmod 600 "$file"
+
+    mv -- "$temp_file" "$file"
 }
 
 # Check Bash version (4.4+ required)
@@ -215,9 +250,11 @@ check_dependencies() {
 
 # Setup backup directories
 setup_directories() {
+    local old_umask
+    old_umask=$(umask)
+    umask 077
     mkdir -p "$BACKUP_DIR"/{configs,credentials}
-    chmod 700 "$BACKUP_DIR"
-    chmod 700 "$BACKUP_DIR"/{configs,credentials}
+    umask "$old_umask"
 }
 
 # Claude Code process detection (Node.js app)
@@ -289,11 +326,13 @@ write_credentials() {
             ;;
         linux|wsl)
             mkdir -p "$HOME/.claude"
-            local tmp
+            local tmp old_umask
+            old_umask=$(umask)
+            umask 077
             tmp=$(mktemp "$HOME/.claude/.credentials.XXXXXX")
+            umask "$old_umask"
             printf '%s' "$credentials" > "$tmp"
-            mv "$tmp" "$HOME/.claude/.credentials.json"
-            chmod 600 "$HOME/.claude/.credentials.json"
+            mv -- "$tmp" "$HOME/.claude/.credentials.json"
             ;;
     esac
 }
@@ -302,6 +341,7 @@ write_credentials() {
 read_account_credentials() {
     local account_num="$1"
     local email="$2"
+    validate_account_params "$account_num" "$email" || return 1
     local platform
     platform=$(detect_platform)
     
@@ -325,6 +365,7 @@ write_account_credentials() {
     local account_num="$1"
     local email="$2"
     local credentials="$3"
+    validate_account_params "$account_num" "$email" || return 1
     local platform
     platform=$(detect_platform)
     
@@ -334,11 +375,13 @@ write_account_credentials() {
             ;;
         linux|wsl)
             local cred_file="$BACKUP_DIR/credentials/.claude-credentials-${account_num}-${email}.json"
-            local tmp
+            local tmp old_umask
+            old_umask=$(umask)
+            umask 077
             tmp=$(mktemp "${cred_file}.XXXXXX")
+            umask "$old_umask"
             printf '%s' "$credentials" > "$tmp"
-            mv "$tmp" "$cred_file"
-            chmod 600 "$cred_file"
+            mv -- "$tmp" "$cred_file"
             ;;
     esac
 }
@@ -347,6 +390,7 @@ write_account_credentials() {
 read_account_config() {
     local account_num="$1"
     local email="$2"
+    validate_account_params "$account_num" "$email" || return 1
     local config_file="$BACKUP_DIR/configs/.claude-config-${account_num}-${email}.json"
     
     if [[ -f "$config_file" ]]; then
@@ -361,13 +405,16 @@ write_account_config() {
     local account_num="$1"
     local email="$2"
     local config="$3"
+    validate_account_params "$account_num" "$email" || return 1
     local config_file="$BACKUP_DIR/configs/.claude-config-${account_num}-${email}.json"
     
-    local tmp
+    local tmp old_umask
+    old_umask=$(umask)
+    umask 077
     tmp=$(mktemp "${config_file}.XXXXXX")
+    umask "$old_umask"
     echo "$config" > "$tmp"
-    mv "$tmp" "$config_file"
-    chmod 600 "$config_file"
+    mv -- "$tmp" "$config_file"
 }
 
 # Cache management functions
@@ -585,11 +632,11 @@ decode_project_path() {
 format_size() {
     local bytes="${1:-0}"
     if [[ "$bytes" -ge 1073741824 ]]; then
-        awk "BEGIN { printf \"%.1f GB\", $bytes / 1073741824 }"
+        awk -v b="$bytes" 'BEGIN { printf "%.1f GB", b / 1073741824 }'
     elif [[ "$bytes" -ge 1048576 ]]; then
-        awk "BEGIN { printf \"%.1f MB\", $bytes / 1048576 }"
+        awk -v b="$bytes" 'BEGIN { printf "%.1f MB", b / 1048576 }'
     elif [[ "$bytes" -ge 1024 ]]; then
-        awk "BEGIN { printf \"%.1f KB\", $bytes / 1024 }"
+        awk -v b="$bytes" 'BEGIN { printf "%.1f KB", b / 1024 }'
     else
         echo "${bytes} B"
     fi
@@ -1264,6 +1311,7 @@ cmd_remove_account() {
     updated_sequence=$(jq --arg num "$account_num" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
         del(.accounts[$num]) |
         .sequence = (.sequence | map(select(. != ($num | tonumber)))) |
+        .activeAccountNumber = (if .activeAccountNumber == ($num | tonumber) then null else .activeAccountNumber end) |
         .bindings = (.bindings // {} | with_entries(select(.value != ($num | tonumber | tostring)))) |
         .lastUpdated = $now
     ' "$SEQUENCE_FILE")
@@ -1680,6 +1728,21 @@ cmd_set_alias() {
         exit 1
     fi
 
+    # Enforce unique aliases so identifier resolution stays deterministic.
+    local existing_alias_num
+    existing_alias_num=$(jq -r --arg alias "$alias" --arg num "$account_num" '
+        .accounts
+        | to_entries[]
+        | select(.key != $num and .value.alias == $alias)
+        | .key
+    ' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -n "$existing_alias_num" && "$existing_alias_num" != "null" ]]; then
+        local existing_alias_email
+        existing_alias_email=$(jq -r --arg num "$existing_alias_num" '.accounts[$num].email // "unknown"' "$SEQUENCE_FILE")
+        log_error "Alias '$alias' is already used by Account-$existing_alias_num ($existing_alias_email)"
+        exit 1
+    fi
+
     show_progress "Setting alias for Account-$account_num"
     local updated_sequence
     updated_sequence=$(jq --arg num "$account_num" --arg alias "$alias" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
@@ -2044,7 +2107,11 @@ cmd_reorder() {
 
     # Build the mapping JSON first — validate before touching any files
     local map_json="{}"
+    declare -A email_map
     for k in "${!num_map[@]}"; do
+        local email_for_num
+        email_for_num=$(jq -r --arg n "$k" '.accounts[$n].email' "$SEQUENCE_FILE")
+        email_map[$k]="$email_for_num"
         map_json=$(jq -n --argjson obj "$map_json" --arg k "$k" --argjson v "${num_map[$k]}" '$obj + {($k): $v}')
     done
 
@@ -2098,7 +2165,7 @@ cmd_reorder() {
         [[ "$old_num" == "$new_num" ]] && continue
 
         local email
-        email=$(jq -r --arg n "$old_num" '.accounts[$n].email' "$SEQUENCE_FILE")
+        email="${email_map[$old_num]}"
 
         case "$platform" in
             macos)
@@ -2128,7 +2195,7 @@ cmd_reorder() {
         [[ "$old_num" == "$new_num" ]] && continue
 
         local email
-        email=$(jq -r --arg n "$old_num" '.accounts[$n].email' "$SEQUENCE_FILE")
+        email="${email_map[$old_num]}"
 
         case "$platform" in
             macos)
@@ -2263,6 +2330,7 @@ cmd_bind() {
     display_path=$(truncate_path "$abs_path")
     log_success "Bound $display_path → Account-$account_num ($email)"
     echo "  Running 'ccm switch' in this directory will auto-switch to this account."
+    echo "  Tip: Add eval \"\$(ccm hook)\" to your shell rc for auto-switch on cd."
 }
 
 # Purpose: Removes a project-to-account binding
@@ -2309,6 +2377,112 @@ cmd_unbind() {
     log_success "Removed binding for $display_path"
 }
 
+# Purpose: Outputs shell hook code for auto-switching accounts on directory change
+# Parameters: None
+# Returns: 0 on success, outputs shell code to stdout
+# Usage: eval "$(ccm hook)" in .zshrc or .bashrc
+cmd_hook() {
+    # Detect current shell from parent process
+    local parent_shell
+    parent_shell=$(ps -o comm= -p "$PPID" 2>/dev/null | sed 's/^-//')
+
+    cat << 'HOOK_EOF'
+# CCM Auto-Switch Hook — switches Claude Code account when entering a bound directory
+# Generated by: ccm hook
+# Add to your shell rc: eval "$(ccm hook)"
+
+# Cache: associative array of path → account number
+typeset -gA _ccm_bindings 2>/dev/null || declare -gA _ccm_bindings 2>/dev/null || declare -A _ccm_bindings
+_ccm_active_account=""
+_ccm_seq_file="${HOME}/.claude-switch-backup/sequence.json"
+_ccm_seq_mtime=""
+
+# Purpose: Loads bindings from sequence.json into _ccm_bindings array
+# Only re-reads if the file mtime has changed
+_ccm_load_bindings() {
+    [[ -f "$_ccm_seq_file" ]] || return
+
+    # Check mtime to avoid unnecessary reads
+    local current_mtime
+    if [[ "$(uname)" == "Darwin" ]]; then
+        current_mtime=$(stat -f %m "$_ccm_seq_file" 2>/dev/null)
+    else
+        current_mtime=$(stat -c %Y "$_ccm_seq_file" 2>/dev/null)
+    fi
+
+    [[ "$current_mtime" == "$_ccm_seq_mtime" ]] && return
+    _ccm_seq_mtime="$current_mtime"
+
+    # Reset and reload
+    _ccm_bindings=()
+    _ccm_active_account=$(command jq -r '.activeAccountNumber // empty' "$_ccm_seq_file" 2>/dev/null)
+
+    local pairs
+    pairs=$(command jq -r '.bindings // {} | to_entries[] | "\(.key)\t\(.value)"' "$_ccm_seq_file" 2>/dev/null)
+    [[ -z "$pairs" ]] && return
+
+    local path acct
+    while IFS=$'\t' read -r path acct; do
+        _ccm_bindings["$path"]="$acct"
+    done <<< "$pairs"
+}
+
+# Purpose: Checks if current directory (or any parent) has a binding and auto-switches
+_ccm_check_binding() {
+    _ccm_load_bindings
+
+    [[ ${#_ccm_bindings[@]} -eq 0 ]] && return
+
+    # Walk up directory tree looking for a binding match
+    local dir="$PWD"
+    while [[ -n "$dir" ]]; do
+        if [[ -n "${_ccm_bindings[$dir]+x}" ]]; then
+            local bound_account="${_ccm_bindings[$dir]}"
+            if [[ "$bound_account" != "$_ccm_active_account" ]]; then
+                echo "[ccm] Auto-switching to account $bound_account for $(basename "$dir")..."
+                command ccm switch "$bound_account" && _ccm_active_account="$bound_account"
+            fi
+            return 0
+        fi
+        [[ "$dir" == "/" ]] && break
+        dir="${dir%/*}"
+        [[ -z "$dir" ]] && dir="/"
+    done
+}
+
+# Load bindings once at shell startup
+_ccm_load_bindings
+HOOK_EOF
+
+    # Output the appropriate hook for the shell
+    case "$parent_shell" in
+        *zsh*)
+            cat << 'ZSH_EOF'
+
+# Zsh: use chpwd hook (called automatically on directory change)
+autoload -Uz add-zsh-hook 2>/dev/null
+if typeset -f add-zsh-hook > /dev/null 2>&1; then
+    add-zsh-hook chpwd _ccm_check_binding
+else
+    chpwd_functions+=(_ccm_check_binding)
+fi
+ZSH_EOF
+            ;;
+        *)
+            cat << 'BASH_EOF'
+
+# Bash: wrap cd/pushd/popd to trigger the check
+_ccm_cd() { builtin cd "$@" && _ccm_check_binding; }
+_ccm_pushd() { builtin pushd "$@" && _ccm_check_binding; }
+_ccm_popd() { builtin popd "$@" && _ccm_check_binding; }
+alias cd='_ccm_cd'
+alias pushd='_ccm_pushd'
+alias popd='_ccm_popd'
+BASH_EOF
+            ;;
+    esac
+}
+
 # Export accounts to encrypted archive
 cmd_export() {
     if [[ $# -eq 0 ]]; then
@@ -2329,7 +2503,7 @@ cmd_export() {
 
     local temp_dir
     temp_dir=$(mktemp -d)
-    trap "rm -rf '$temp_dir'" EXIT
+    trap 'rm -rf -- "$temp_dir"' EXIT
 
     # Copy sequence file
     cp "$SEQUENCE_FILE" "$temp_dir/sequence.json"
@@ -2402,7 +2576,7 @@ cmd_import() {
     show_progress "Extracting archive"
     local temp_dir
     temp_dir=$(mktemp -d)
-    trap "rm -rf '$temp_dir'" EXIT
+    trap 'rm -rf -- "$temp_dir"' EXIT
 
     tar -xzf "$archive_path" -C "$temp_dir" 2>/dev/null || {
         log_error "Failed to extract archive"
@@ -2941,6 +3115,32 @@ show_help() {
             echo "  ccm clean all --dry-run"
             echo "  ccm clean all"
             ;;
+        hook)
+            echo -e "${COLOR_BOLD}ccm hook — Shell Auto-Switch Hook${COLOR_RESET}"
+            echo ""
+            echo "Usage: eval \"\$(ccm hook)\""
+            echo ""
+            echo "Outputs shell code that auto-switches your Claude Code account"
+            echo "when you cd into a directory with a project binding."
+            echo ""
+            echo -e "${COLOR_BOLD}How it works:${COLOR_RESET}"
+            echo "  1. Loads bindings from sequence.json into memory at shell startup"
+            echo "  2. On every cd, checks if the new directory (or parent) has a binding"
+            echo "  3. If bound to a different account, runs 'ccm switch' automatically"
+            echo ""
+            echo -e "${COLOR_BOLD}Performance:${COLOR_RESET}"
+            echo "  Startup: ~30ms (one jq call to load bindings)"
+            echo "  Per cd: ~0ms (pure bash array lookup, no subprocesses)"
+            echo "  Re-reads sequence.json only when file mtime changes"
+            echo ""
+            echo -e "${COLOR_BOLD}Setup:${COLOR_RESET}"
+            echo "  # Add to ~/.zshrc or ~/.bashrc:"
+            echo "  eval \"\$(ccm hook)\""
+            echo ""
+            echo -e "${COLOR_BOLD}Shell support:${COLOR_RESET}"
+            echo "  Zsh:  Uses chpwd hook (native directory change event)"
+            echo "  Bash: Wraps cd/pushd/popd with auto-switch check"
+            ;;
         optimize)
             echo -e "${COLOR_BOLD}ccm optimize — Token Usage Analysis${COLOR_RESET}"
             echo ""
@@ -3112,6 +3312,7 @@ show_help() {
             echo "  bind [path] <account>              Bind project directory to an account"
             echo "  unbind [path]                      Remove project binding"
             echo "  bind list                          Show all project bindings"
+            echo "  hook                               Output shell hook for auto-switch on cd"
             echo "  undo                               Undo last account switch"
             echo "  history                            Show account switch history"
             echo ""
@@ -3186,6 +3387,8 @@ cmd_env() {
 env_snapshot() {
     local name="${1:-}"
     local snapshots_dir="$BACKUP_DIR/snapshots"
+    local config_source
+    config_source=$(get_claude_config_path)
 
     # Auto-generate name if none given
     if [[ -z "$name" ]]; then
@@ -3213,9 +3416,11 @@ env_snapshot() {
     log_info "Creating snapshot '$name'..."
 
     # Define source files and their stored names
-    local -a source_files=(
-        "$HOME/.claude/settings.json:settings.json"
-        "$HOME/.claude/.claude.json:claude.json"
+    local -a source_files=("$HOME/.claude/settings.json:settings.json")
+    if [[ -f "$config_source" ]]; then
+        source_files+=("$config_source:claude.json")
+    fi
+    source_files+=(
         "$HOME/.claude/CLAUDE.md:CLAUDE.md"
         "$HOME/.claude/.mcp.json:mcp.json"
     )
@@ -3276,6 +3481,7 @@ env_snapshot() {
 env_restore() {
     local name="${1:-}"
     local force=0
+    local restore_warnings=0
 
     if [[ -z "$name" ]]; then
         log_error "Snapshot name required. Usage: ccm env restore <name> [--force]"
@@ -3351,14 +3557,43 @@ env_restore() {
             mkdir -p "$target_dir"
         fi
 
-        if [[ "$stored" == "claude.json" ]] && [[ -f "$target_path" ]]; then
-            # CRITICAL: Merge oauthAccount fields, preserving tokens/credentials
+        if [[ "$stored" == "claude.json" ]]; then
+            # Snapshots only store identity fields, so we must merge into an
+            # existing config to preserve the current credentials/tokens.
+            local merge_target="$target_path"
+            if [[ ! -f "$merge_target" ]]; then
+                local fallback_target
+                fallback_target=$(get_claude_config_path)
+                if [[ -f "$fallback_target" ]]; then
+                    merge_target="$fallback_target"
+                else
+                    log_warning "Skipping claude.json restore: no existing config file found to preserve credentials."
+                    restore_warnings=$((restore_warnings + 1))
+                    continue
+                fi
+            fi
+
+            target_dir=$(dirname "$merge_target")
+            if [[ ! -d "$target_dir" ]]; then
+                mkdir -p "$target_dir"
+            fi
+
             show_progress "Merging $stored (preserving credentials)"
             local oauth_section
-            oauth_section=$(jq '.oauthAccount' "$source_file")
+            oauth_section=$(jq '.oauthAccount' "$source_file" 2>/dev/null)
+            if [[ -z "$oauth_section" || "$oauth_section" == "null" ]]; then
+                log_warning "Skipping claude.json restore: snapshot is missing oauthAccount data."
+                restore_warnings=$((restore_warnings + 1))
+                continue
+            fi
             local merged
-            merged=$(jq --argjson oauth "$oauth_section" '.oauthAccount = (.oauthAccount * $oauth)' "$target_path")
-            echo "$merged" > "$target_path"
+            merged=$(jq --argjson oauth "$oauth_section" '.oauthAccount = ((.oauthAccount // {}) * $oauth)' "$merge_target" 2>/dev/null)
+            if [[ -z "$merged" ]]; then
+                log_warning "Skipping claude.json restore: existing config is invalid JSON at $merge_target."
+                restore_warnings=$((restore_warnings + 1))
+                continue
+            fi
+            write_json "$merge_target" "$merged"
             complete_progress
         else
             show_progress "Restoring $stored"
@@ -3366,6 +3601,11 @@ env_restore() {
             complete_progress
         fi
     done
+
+    if [[ "$restore_warnings" -gt 0 ]]; then
+        log_warning "Snapshot '$name' restored with $restore_warnings warning(s)."
+        return 1
+    fi
 
     log_success "Snapshot '$name' restored successfully."
 }
@@ -5150,6 +5390,8 @@ cmd_statusline() {
             echo -e "${COLOR_BOLD}CCM Statusline Setup${COLOR_RESET}"
             echo ""
 
+            mkdir -p "$HOME/.claude"
+
             # Create the statusline script
             cat > "$script_path" << 'STATUSLINE_EOF'
 #!/usr/bin/env bash
@@ -5161,21 +5403,24 @@ input=$(cat)
 R="\033[0m" C="\033[36m" D="\033[90m" G="\033[32m" Y="\033[33m" RED="\033[31m"
 
 # ── Extract all session data in a single jq call for performance ──
-eval "$(echo "$input" | jq -r '
-    "PCT=\(.context_window.used_percentage // 0 | floor)",
-    "IN_TOK=\(.context_window.current_usage.input_tokens // 0)",
-    "CC_TOK=\(.context_window.current_usage.cache_creation_input_tokens // 0)",
-    "CR_TOK=\(.context_window.current_usage.cache_read_input_tokens // 0)",
-    "COST=\(.cost.total_cost_usd // 0)",
-    "DUR_MS=\(.cost.total_duration_ms // 0)",
-    "API_MS=\(.cost.total_api_duration_ms // 0)",
-    "CWD=\(.cwd // "" | @sh)",
-    "RL5_PCT=\(.rate_limits.five_hour.used_percentage // "" | tostring)",
-    "RL5_RESET=\(.rate_limits.five_hour.resets_at // "" | tostring)",
-    "RL7_PCT=\(.rate_limits.seven_day.used_percentage // "" | tostring)",
-    "RL7_RESET=\(.rate_limits.seven_day.resets_at // "" | tostring)",
-    "CC_VER=\(.version // "" | @sh)"
-' 2>/dev/null)"
+# Uses tab-delimited output with read instead of eval to prevent command injection
+IFS=$'\t' read -r PCT IN_TOK CC_TOK CR_TOK COST DUR_MS API_MS CWD RL5_PCT RL5_RESET RL7_PCT RL7_RESET CC_VER < <(
+    echo "$input" | jq -r '[
+        (.context_window.used_percentage // 0 | floor),
+        (.context_window.current_usage.input_tokens // 0),
+        (.context_window.current_usage.cache_creation_input_tokens // 0),
+        (.context_window.current_usage.cache_read_input_tokens // 0),
+        (.cost.total_cost_usd // 0),
+        (.cost.total_duration_ms // 0),
+        (.cost.total_api_duration_ms // 0),
+        (.cwd // ""),
+        (.rate_limits.five_hour.used_percentage // "" | tostring),
+        (.rate_limits.five_hour.resets_at // "" | tostring),
+        (.rate_limits.seven_day.used_percentage // "" | tostring),
+        (.rate_limits.seven_day.resets_at // "" | tostring),
+        (.version // "")
+    ] | @tsv' 2>/dev/null
+)
 
 TOKENS=$((IN_TOK + CC_TOK + CR_TOK))
 
@@ -5193,15 +5438,15 @@ else BAR_C="$G"; fi
 
 # ── Format tokens (K/M) ──
 if [[ "$TOKENS" -ge 1000000 ]]; then
-    TOK_FMT="$(awk "BEGIN{printf \"%.1fM\", $TOKENS/1000000}")"
+    TOK_FMT="$(awk -v t="$TOKENS" 'BEGIN{printf "%.1fM", t/1000000}')"
 elif [[ "$TOKENS" -ge 1000 ]]; then
-    TOK_FMT="$(awk "BEGIN{printf \"%.0fK\", $TOKENS/1000}")"
+    TOK_FMT="$(awk -v t="$TOKENS" 'BEGIN{printf "%.0fK", t/1000}')"
 else
     TOK_FMT="${TOKENS}"
 fi
 
 # ── Format cost ──
-COST_FMT=$(awk "BEGIN{printf \"\$%.2f\", $COST}" 2>/dev/null || echo "\$$COST")
+COST_FMT=$(awk -v c="$COST" 'BEGIN{printf "$%.2f", c}' 2>/dev/null || echo "\$$COST")
 
 # ── Format session duration ──
 DUR_S=$((DUR_MS / 1000))
@@ -5230,9 +5475,9 @@ BURN_FMT=""
 if [[ "$DUR_S" -gt 60 ]] && [[ "$TOKENS" -gt 0 ]]; then
     BURN=$((TOKENS / (DUR_S / 60)))
     if [[ "$BURN" -ge 1000000 ]]; then
-        BURN_FMT="$(awk "BEGIN{printf \"%.1fM\", $BURN/1000000}")/m"
+        BURN_FMT="$(awk -v b="$BURN" 'BEGIN{printf "%.1fM", b/1000000}')/m"
     elif [[ "$BURN" -ge 1000 ]]; then
-        BURN_FMT="$(awk "BEGIN{printf \"%.0fK\", $BURN/1000}")/m"
+        BURN_FMT="$(awk -v b="$BURN" 'BEGIN{printf "%.0fK", b/1000}')/m"
     else
         BURN_FMT="${BURN}/m"
     fi
@@ -5263,15 +5508,14 @@ RL_FMT+="$(_fmt_rl "$RL7_PCT" "$RL7_RESET" "7d")"
 
 # ── Git branch ──
 BRANCH=""
-CWD_CLEAN=$(echo "$CWD" | tr -d "'")
-if [[ -n "$CWD_CLEAN" ]] && command -v git &>/dev/null; then
-    BRANCH=$(git -C "$CWD_CLEAN" branch --show-current 2>/dev/null)
+if [[ -n "$CWD" ]] && command -v git &>/dev/null; then
+    BRANCH=$(git -C "$CWD" branch --show-current 2>/dev/null)
 fi
 
 # ── Directory (short) ──
 DIR_SHORT=""
-if [[ -n "$CWD_CLEAN" ]]; then
-    DIR_SHORT="${CWD_CLEAN/#$HOME/~}"
+if [[ -n "$CWD" ]]; then
+    DIR_SHORT="${CWD/#$HOME/~}"
     [[ ${#DIR_SHORT} -gt 30 ]] && DIR_SHORT="…${DIR_SHORT: -29}"
 fi
 
@@ -5310,10 +5554,9 @@ L1+="${RL_FMT}"
 echo -e "$L1"
 
 # ── LINE 2: Directory + branch + version + compact warning ──
-VER_CLEAN=$(echo "$CC_VER" | tr -d "'")
 L2="${C}${DIR_SHORT}${R}"
 [[ -n "$BRANCH" ]] && L2+=" ${D}·${R} ${G}${BRANCH}${R}"
-[[ -n "$VER_CLEAN" ]] && L2+=" ${D}· v${VER_CLEAN}${R}"
+[[ -n "$CC_VER" ]] && L2+=" ${D}· v${CC_VER}${R}"
 L2+="${COMPACT_WARN}"
 echo -e "$L2"
 
@@ -5777,6 +6020,7 @@ main() {
         reorder)        shift; cmd_reorder "$@" ;;
         bind)           shift; cmd_bind "$@" ;;
         unbind)         shift; cmd_unbind "$@" ;;
+        hook)           cmd_hook ;;
         interactive)    cmd_interactive ;;
         session)        shift; cmd_session "$@" ;;
         env)            shift; cmd_env "$@" ;;

@@ -43,6 +43,7 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm bind [path] <account>` | Bind project directory to an account |
 | `ccm unbind [path]` | Remove project binding |
 | `ccm bind list` | Show all project bindings |
+| `ccm hook` | Output shell hook for auto-switch on cd |
 | `ccm verify [id]` | Verify backup integrity |
 | `ccm history` | Show recent switch history |
 | `ccm export <path>` | Export accounts to archive |
@@ -166,6 +167,15 @@ ccm bind ~/work/project work       # bind project to work account
 ccm bind ~/personal/side-project personal
 ccm bind list                      # show all bindings
 # Now `ccm switch` in a bound directory auto-switches to the right account
+```
+
+### Auto-switch on cd (shell hook)
+```bash
+# Add to ~/.zshrc or ~/.bashrc:
+eval "$(ccm hook)"
+# Now entering a bound directory auto-switches accounts
+cd ~/work/project    # → auto-switches to work account
+cd ~/personal/side   # → auto-switches to personal account
 ```
 
 ### Token usage analytics

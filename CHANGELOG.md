@@ -2,6 +2,25 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [3.3.1] - 2026-03-30
+
+### Added
+- **`ccm hook`** — outputs shell hook code for auto-switching accounts on `cd`. Add `eval "$(ccm hook)"` to `.zshrc`/`.bashrc` and bound projects auto-switch when you enter them
+- Shell hook caches bindings in an associative array at startup (~30ms), then does pure-bash lookups on every `cd` (~0ms overhead)
+- Parent directory matching — binding `~/Personal` matches `~/Personal/projects/foo/src`
+- Zsh uses native `chpwd` hook; Bash wraps `cd`/`pushd`/`popd`
+- Mtime guard: re-reads `sequence.json` only when the file changes
+- `ccm bind` now shows a tip about `ccm hook` for auto-switch on cd
+
+### Security
+- **Eliminated `eval` command injection** — replaced `eval "$(jq ...)"` in statusline with safe `IFS read` + jq `@tsv` pattern; data is never interpreted as shell code
+- **Fixed temp file race condition** — credential and config writes now use `umask 077` before `mktemp`, ensuring files are owner-only from creation
+- **Added path traversal protection** — new `validate_account_params()` validates account numbers (numeric-only) and emails (regex) before constructing file paths
+- **Secured trap cleanup patterns** — `trap "rm -rf '$dir'"` replaced with `trap 'rm -rf -- "$dir"'` for proper deferred expansion and end-of-options safety
+- **Fixed awk injection vectors** — all `awk "... $var ..."` patterns replaced with safe `awk -v name="$var" '...'` variable passing
+- **Added jq result validation** — `resolve_account_identifier()` now validates extracted account numbers are numeric before use
+- **Added input bounds checking** — identifier inputs limited to 255 characters
+
 ## [3.3.0] - 2026-03-28
 
 ### Added

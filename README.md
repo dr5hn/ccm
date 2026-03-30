@@ -20,6 +20,7 @@ Manage accounts, sessions, environments, and usage — all from the terminal. Wo
 - **Account aliases** — friendly names like `work` or `personal` for quick access
 - **Account reorder** — rearrange account positions with automatic credential renaming
 - **Project bindings** — bind directories to accounts, auto-switch with `ccm switch`
+- **Shell hook** — `eval "$(ccm hook)"` auto-switches accounts when you `cd` into bound directories (zero per-cd overhead)
 - **Switch history and undo** — track switches and revert instantly
 - **Health verification** — validate backup integrity for all accounts
 - **Export/Import** — backup and restore account configurations as portable archives
@@ -159,6 +160,7 @@ ccm reorder <from> <to>        # Reorder account positions
 ccm bind [path] <account>      # Bind project directory to an account
 ccm unbind [path]              # Remove project binding
 ccm bind list                  # Show all project bindings
+ccm hook                       # Output shell hook for auto-switch on cd
 ccm verify [id]                # Verify backup integrity
 ccm history                    # View switch history
 ccm export <path>              # Export accounts to archive
@@ -275,6 +277,10 @@ ccm bind ~/work/project work       # bind project to work account
 ccm bind . personal                # bind current directory
 ccm bind list                      # show all bindings
 # Now `ccm switch` in a bound directory auto-switches
+
+# Auto-switch on cd (add to ~/.zshrc or ~/.bashrc):
+eval "$(ccm hook)"
+# cd ~/work/project → auto-switches to work account
 ```
 
 ### Launch Claude Code with Presets
@@ -340,12 +346,23 @@ ccm env restore before-experiment  # roll back if needed
 ccm session relocate ~/old-project ~/new-location/project
 ```
 
+## Security
+
+CCM handles OAuth credentials — security is taken seriously:
+
+- **No `eval`** — all external data (JSON, user input) is processed with safe parsing patterns (`IFS read`, `jq @tsv`), never interpreted as shell code
+- **Atomic writes with restricted permissions** — credential and config files are created with `umask 077` (owner-only from the moment of creation), then atomically moved into place
+- **Input validation at every boundary** — account numbers validated as numeric, emails validated against regex, snapshot names restricted to `[a-zA-Z0-9._-]`, identifiers bounded to 255 chars
+- **Path traversal protection** — all parameters used in file path construction are validated before use
+- **macOS Keychain integration** — credentials stored in the system keychain, not on disk
+- **Safe cleanup patterns** — `trap` and `rm` commands use proper quoting and `--` end-of-options markers
+
 ## How It Works
 
 CCM stores account data separately from Claude Code:
 
 - **macOS**: Credentials in Keychain, OAuth config in `~/.claude-switch-backup/`
-- **Linux/WSL**: Both stored in `~/.claude-switch-backup/` with restricted permissions (600)
+- **Linux/WSL**: Both stored in `~/.claude-switch-backup/` with restricted permissions (owner-only via umask 077)
 
 When switching accounts, CCM backs up the current account, restores the target, and updates Claude Code's auth files. Sessions, settings, and preferences are preserved.
 

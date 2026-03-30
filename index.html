@@ -987,7 +987,7 @@ body {
         <div class="feature-icon">⊞</div>
         <div class="feature-name">Project Bindings</div>
         <div class="feature-cmd">ccm bind . work</div>
-        <div class="feature-desc">Bind project directories to accounts. Running ccm switch in a bound directory auto-switches to the right account.</div>
+        <div class="feature-desc">Bind project directories to accounts. Auto-switch on cd with <code>eval "$(ccm hook)"</code> in your shell rc — zero overhead, parent directory matching.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊡</div>
@@ -1042,6 +1042,18 @@ body {
         <div class="feature-name">Environment Snapshots</div>
         <div class="feature-cmd">ccm env snapshot</div>
         <div class="feature-desc">Save and restore your Claude Code config. Audit MCP servers for token waste.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊞</div>
+        <div class="feature-name">Shell Auto-Switch</div>
+        <div class="feature-cmd">eval "$(ccm hook)"</div>
+        <div class="feature-desc">Auto-switch accounts when you cd into a bound directory. Zero-overhead bash array lookups, native zsh chpwd hook.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊠</div>
+        <div class="feature-name">Security Hardened</div>
+        <div class="feature-cmd">No eval · umask 077</div>
+        <div class="feature-desc">No eval with external data, atomic writes with restrictive umask, input validation at every boundary, path traversal protection.</div>
       </div>
     </div>
   </div>
@@ -1104,7 +1116,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Account Management</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">16 commands</span>
+          <span class="cmd-count">17 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1121,6 +1133,7 @@ body {
           <tr><td>ccm bind [path] &lt;account&gt;</td><td>Bind project directory to an account</td></tr>
           <tr><td>ccm unbind [path]</td><td>Remove project binding</td></tr>
           <tr><td>ccm bind list</td><td>Show all project bindings</td></tr>
+          <tr><td>ccm hook</td><td>Shell hook for auto-switch on cd</td></tr>
           <tr><td>ccm verify [id]</td><td>Verify backup integrity</td></tr>
           <tr><td>ccm history</td><td>Show switch history</td></tr>
           <tr><td>ccm export &lt;path&gt;</td><td>Export accounts to archive</td></tr>
@@ -1305,6 +1318,15 @@ var demos = {
     { type: 'cmd', text: 'ccm switch' },
     { type: 'blank' },
     { type: 'active', text: 'i Project binding: switching to Account-2 (darshan@company.com)' },
+    { type: 'success', text: '✓ Switched: personal → work' },
+    { type: 'blank' },
+    { type: 'muted',  text: '# Auto-switch on cd (add to ~/.zshrc):' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'eval "$(ccm hook)"' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'cd ~/projects/my-saas-app' },
+    { type: 'active', text: '[ccm] Auto-switching to account 2 for my-saas-app...' },
     { type: 'success', text: '✓ Switched: personal → work' }
   ],
   sessions: [
