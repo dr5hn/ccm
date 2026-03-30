@@ -2,6 +2,11 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [3.3.2] - 2026-03-30
+### Fixed
+- Add error checking to Keychain rename during account reorder to prevent silent data inconsistency
+
+
 ## [3.3.1] - 2026-03-30
 
 ### Added
