@@ -1,0 +1,36 @@
+{
+  "name": "ccm-cli",
+  "version": "4.0.0",
+  "description": "CLI toolkit for managing multiple Claude Code accounts, sessions, environments, and health",
+  "bin": {
+    "ccm": "./ccm.sh"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "account-manager",
+    "multi-account",
+    "cli",
+    "session-management",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/dr5hn/ccm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dr5hn/ccm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dr5hn/ccm/issues"
+  },
+  "author": "Darshan Gada <gadadarshan@gmail.com>",
+  "license": "MIT",
+  "files": [
+    "ccm.sh",
+    "README.md",
+    "LICENSE"
+  ]
+}
