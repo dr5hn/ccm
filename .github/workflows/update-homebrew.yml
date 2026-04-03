@@ -1,0 +1,69 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release info
+        id: release
+        env:
+          GH_REF: ${{ github.ref }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          VERSION="${GH_REF#refs/tags/v}"
+          TAG="${GH_REF#refs/tags/}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "url=https://github.com/${GH_REPO}/archive/refs/tags/${TAG}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Download release tarball and compute SHA256
+        id: sha
+        env:
+          TARBALL_URL: ${{ steps.release.outputs.url }}
+        run: |
+          curl -sL "$TARBALL_URL" -o release.tar.gz
+          SHA=$(sha256sum release.tar.gz | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.release.outputs.version }}
+          TARBALL_URL: ${{ steps.release.outputs.url }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/dr5hn/homebrew-tap.git" tap
+          cd tap
+
+          cat > Formula/ccm.rb << EOF
+          class Ccm < Formula
+            desc "CLI toolkit for managing multiple Claude Code accounts, sessions, and health"
+            homepage "https://github.com/dr5hn/ccm"
+            url "${TARBALL_URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+
+            depends_on "bash" => "4.4:"
+            depends_on "jq"
+
+            def install
+              bin.install "ccm.sh" => "ccm"
+            end
+
+            test do
+              assert_match "ccm (Claude Code Manager)", shell_output("#{bin}/ccm version")
+            end
+          end
+          EOF
+
+          sed -i 's/^          //' Formula/ccm.rb
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/ccm.rb
+          git commit -m "ccm ${VERSION}"
+          git push
