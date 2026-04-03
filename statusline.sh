@@ -140,6 +140,16 @@ RL_FMT=""
 RL_FMT+="$(_fmt_rl "$RL5_PCT" "$RL5_RESET" "5hr")"
 RL_FMT+="$(_fmt_rl "$RL7_PCT" "$RL7_RESET" "7d")"
 
+# ── Write rate limits to shared file for ccm watch ──
+RL_FILE="$HOME/.claude-switch-backup/rate-limits.json"
+if [[ -n "$RL5_PCT" && "$RL5_PCT" != "null" ]] || [[ -n "$RL7_PCT" && "$RL7_PCT" != "null" ]]; then
+    mkdir -p "$(dirname "$RL_FILE")" 2>/dev/null
+    cat > "${RL_FILE}.tmp" 2>/dev/null << RLJSON
+{"five_hour":{"used_percentage":${RL5_PCT:-0},"resets_at":${RL5_RESET:-0}},"seven_day":{"used_percentage":${RL7_PCT:-0},"resets_at":${RL7_RESET:-0}},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+RLJSON
+    mv "${RL_FILE}.tmp" "$RL_FILE" 2>/dev/null
+fi
+
 # ── Git branch ──
 BRANCH=""
 if [[ -n "$CWD" ]] && command -v git &>/dev/null; then
@@ -153,14 +163,16 @@ if [[ -n "$CWD" ]]; then
     [[ ${#DIR_SHORT} -gt 30 ]] && DIR_SHORT="…${DIR_SHORT: -29}"
 fi
 
-# ── CCM account data (direct file read) ──
+# ── CCM account data (direct file read + env var fallback) ──
 SEQ="$HOME/.claude-switch-backup/sequence.json"
 CONF="$HOME/.claude/.claude.json"
 [[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
 
 ALIAS="" EMAIL_SHORT="" HEALTH="" TOTAL_ACCTS=0
 if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
-    EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
+    # Use CLAUDE_CODE_USER_EMAIL env var if available (v2.1.51+), fall back to config file
+    EMAIL="${CLAUDE_CODE_USER_EMAIL:-}"
+    [[ -z "$EMAIL" ]] && EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
     if [[ -n "$EMAIL" ]]; then
         EMAIL_SHORT="$EMAIL"
         ACCT_DATA=$(jq -r --arg e "$EMAIL" '
@@ -202,7 +214,16 @@ if [[ "$TOTAL_ACCTS" -ge 2 ]]; then
         degraded) H="${Y}●${R}" ;;
         *)        H="${RED}●${R}" ;;
     esac
-    echo -e "${C}${ACCT_LABEL}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H}"
+    # Check for bound account in current directory
+    BOUND=""
+    if [[ -n "$CWD" ]] && [[ -f "$SEQ" ]]; then
+        BOUND_ACCT=$(jq -r --arg p "$CWD" '.bindings[$p] // empty' "$SEQ" 2>/dev/null)
+        if [[ -n "$BOUND_ACCT" ]]; then
+            BOUND_ALIAS=$(jq -r --arg n "$BOUND_ACCT" '.accounts[$n].alias // ("acct-" + $n)' "$SEQ" 2>/dev/null)
+            BOUND=" ${D}· bound:${R} ${C}${BOUND_ALIAS}${R}"
+        fi
+    fi
+    echo -e "${C}${ACCT_LABEL}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H}${BOUND}"
 fi
 EOF
 
