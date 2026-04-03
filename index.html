@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CCM — Claude Code Manager</title>
-<meta name="description" content="The power-user toolkit for Claude Code. Manage multiple accounts, bind projects, search sessions, track token usage, clean disk bloat — all from the terminal. Open source CLI for macOS, Linux, WSL.">
+<meta name="description" content="The power-user toolkit for Claude Code v4.0. Concurrent sessions, rate limit auto-switch, per-account dashboards, session archival, setup wizard — plus multi-account management, project bindings, and disk cleanup. Open source CLI for macOS, Linux, WSL.">
 <meta name="keywords" content="Claude Code, account manager, CLI tool, multi-account, session management, token usage, environment snapshots, token optimization, developer tools, project bindings">
 <meta name="author" content="Darshan Gada">
 <link rel="canonical" href="https://github.com/dr5hn/ccm">
@@ -12,7 +12,7 @@
 <!-- Open Graph -->
 <meta property="og:type" content="website">
 <meta property="og:title" content="CCM — Claude Code Manager">
-<meta property="og:description" content="Manage multiple Claude Code accounts from one terminal. Switch accounts, bind projects, search sessions, track token usage, clean disk bloat — all from the CLI.">
+<meta property="og:description" content="CCM v4.0 — concurrent sessions, rate limit auto-switch, per-account dashboards, session archival. Manage multiple Claude Code accounts from one terminal.">
 <meta property="og:image" content="https://raw.githubusercontent.com/dr5hn/ccm/main/og-image.svg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -22,7 +22,7 @@
 <!-- Twitter Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="CCM — Claude Code Manager">
-<meta name="twitter:description" content="Manage multiple Claude Code accounts from one terminal. Switch, snapshot, optimize — all from the CLI.">
+<meta name="twitter:description" content="CCM v4.0 — concurrent sessions, rate limit auto-switch, per-account dashboards, session archival. The power-user toolkit for Claude Code.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/dr5hn/ccm/main/og-image.svg">
 
 <!-- Structured Data -->
@@ -31,7 +31,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "CCM — Claude Code Manager",
-  "description": "The power-user toolkit for Claude Code. Manage multiple accounts, sessions, environments, and usage from the terminal.",
+  "description": "CCM v4.0 — the power-user toolkit for Claude Code. Concurrent sessions, rate limit auto-switch, per-account dashboards, session archival, setup wizard, plus multi-account management from the terminal.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux, WSL",
   "offers": {
@@ -895,9 +895,9 @@ body {
 ██║     ██║     ██║╚██╔╝██║
 ╚██████╗╚██████╗██║ ╚═╝ ██║
  ╚═════╝ ╚═════╝╚═╝     ╚═╝</pre>
-      <div class="hero-badge">★ Open Source · MIT License</div>
+      <div class="hero-badge">v4.0.0 · Open Source · MIT License</div>
       <h1 class="hero-headline gradient-text">The power-user toolkit for Claude Code</h1>
-      <p class="hero-sub">Manage accounts, sessions, health, and permissions — all from one CLI. Auto-switch accounts when you cd. Audit dead permission rules. Clean 500GB of session bloat. No Node, no Python — just bash.</p>
+      <p class="hero-sub">Concurrent sessions, rate limit auto-switch, per-account dashboards, session archival — plus multi-account management, project bindings, and disk cleanup. No Node, no Python — just bash.</p>
       <div class="hero-ctas">
         <a href="#install" class="btn-primary">Get Started</a>
         <a href="https://github.com/dr5hn/ccm" target="_blank" rel="noopener" class="btn-secondary">View on GitHub</a>
@@ -959,6 +959,7 @@ body {
       <button class="demo-tab" data-demo="bindings">bindings</button>
       <button class="demo-tab" data-demo="sessions">sessions</button>
       <button class="demo-tab" data-demo="tokens">token usage</button>
+      <button class="demo-tab" data-demo="watch">rate watcher</button>
       <button class="demo-tab" data-demo="doctor">doctor</button>
       <button class="demo-tab" data-demo="permissions">permissions</button>
     </div>
@@ -1009,15 +1010,33 @@ body {
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊘</div>
-        <div class="feature-name">Token Optimization</div>
-        <div class="feature-cmd">ccm optimize</div>
-        <div class="feature-desc">Analyze context window footprint. Flag unused plugins and oversized CLAUDE.md files inflating token usage.</div>
+        <div class="feature-name">Concurrent Sessions</div>
+        <div class="feature-cmd">ccm switch --isolated work</div>
+        <div class="feature-desc">True parallel sessions via CLAUDE_CONFIG_DIR. Run multiple accounts simultaneously without conflicts.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊗</div>
-        <div class="feature-name">Launch Modes</div>
-        <div class="feature-cmd">ccm launch auto</div>
-        <div class="feature-desc">Launch Claude Code with auto, yolo, plan, or safe mode. Terminal reset on exit fixes broken Ctrl-C in tmux.</div>
+        <div class="feature-name">Rate Limit Watcher</div>
+        <div class="feature-cmd">ccm watch --threshold 85 --auto</div>
+        <div class="feature-desc">Monitor rate limits in real time. Auto-switch to the next available account when usage hits your threshold.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊞</div>
+        <div class="feature-name">Per-Account Dashboard</div>
+        <div class="feature-cmd">ccm usage dashboard</div>
+        <div class="feature-desc">Token usage attributed per account. See which account is burning tokens and where, with per-project drill-down.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊟</div>
+        <div class="feature-name">Session Archive</div>
+        <div class="feature-cmd">ccm session archive</div>
+        <div class="feature-desc">Compress old sessions instead of deleting them. Reclaim disk space while keeping conversation history searchable.</div>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feature-icon">⊛</div>
+        <div class="feature-name">Setup Wizard</div>
+        <div class="feature-cmd">ccm setup</div>
+        <div class="feature-desc">Interactive first-run onboarding. Add accounts, configure bindings, install statusline, and set shell hook — all guided.</div>
       </div>
       <div class="feature-card glass-card">
         <div class="feature-icon">⊙</div>
@@ -1116,7 +1135,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Account Management</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">17 commands</span>
+          <span class="cmd-count">16 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1127,7 +1146,6 @@ body {
           <tr><td>ccm switch [id]</td><td>Switch account (next, specific, or project-bound)</td></tr>
           <tr><td>ccm undo</td><td>Revert last switch</td></tr>
           <tr><td>ccm list</td><td>List managed accounts</td></tr>
-          <tr><td>ccm status</td><td>Active account details</td></tr>
           <tr><td>ccm alias &lt;id&gt; &lt;name&gt;</td><td>Set account alias</td></tr>
           <tr><td>ccm reorder &lt;from&gt; &lt;to&gt;</td><td>Reorder account positions</td></tr>
           <tr><td>ccm bind [path] &lt;account&gt;</td><td>Bind project directory to an account</td></tr>
@@ -1138,7 +1156,7 @@ body {
           <tr><td>ccm history</td><td>Show switch history</td></tr>
           <tr><td>ccm export &lt;path&gt;</td><td>Export accounts to archive</td></tr>
           <tr><td>ccm import &lt;path&gt;</td><td>Import from archive</td></tr>
-          <tr><td>ccm interactive</td><td>Interactive menu mode</td></tr>
+          <tr><td>ccm switch --isolated &lt;id&gt;</td><td>Switch with isolated CLAUDE_CONFIG_DIR</td></tr>
         </table>
       </div>
     </div>
@@ -1147,7 +1165,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Session Management</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">5 commands</span>
+          <span class="cmd-count">6 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1158,6 +1176,7 @@ body {
           <tr><td>ccm session search &lt;query&gt; [--limit N]</td><td>Full-text search across all sessions</td></tr>
           <tr><td>ccm session relocate &lt;old&gt; &lt;new&gt;</td><td>Move sessions after project relocation</td></tr>
           <tr><td>ccm session clean [--dry-run]</td><td>Remove orphaned sessions</td></tr>
+          <tr><td>ccm session archive [--days N]</td><td>Compress old sessions to save disk</td></tr>
         </table>
       </div>
     </div>
@@ -1207,15 +1226,17 @@ body {
 
     <div class="cmd-group" data-accordion>
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
-        <span class="cmd-group-title">Token Optimization</span>
+        <span class="cmd-group-title">Rate Limit Watcher</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">1 command</span>
+          <span class="cmd-count">3 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
       <div class="cmd-group-body">
         <table class="cmd-table">
-          <tr><td>ccm optimize</td><td>Analyze token usage and suggest reductions</td></tr>
+          <tr><td>ccm watch</td><td>Monitor rate limits for active account</td></tr>
+          <tr><td>ccm watch --threshold N</td><td>Set usage % threshold for alerts</td></tr>
+          <tr><td>ccm watch --threshold N --auto</td><td>Auto-switch account on rate limit</td></tr>
         </table>
       </div>
     </div>
@@ -1224,7 +1245,7 @@ body {
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
         <span class="cmd-group-title">Usage Stats</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">3 commands</span>
+          <span class="cmd-count">4 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
@@ -1233,25 +1254,22 @@ body {
           <tr><td>ccm usage summary</td><td>Claude Code footprint overview</td></tr>
           <tr><td>ccm usage top [--count N]</td><td>Top projects by disk usage</td></tr>
           <tr><td>ccm usage history [--days N] [--project &lt;path&gt;]</td><td>Token usage by project and day</td></tr>
+          <tr><td>ccm usage dashboard</td><td>Per-account token usage dashboard</td></tr>
         </table>
       </div>
     </div>
 
     <div class="cmd-group" data-accordion>
       <div class="cmd-group-header" onclick="toggleAccordion(this)">
-        <span class="cmd-group-title">Launcher &amp; Setup</span>
+        <span class="cmd-group-title">Setup &amp; Tools</span>
         <div class="cmd-group-meta">
-          <span class="cmd-count">9 commands</span>
+          <span class="cmd-count">4 commands</span>
           <span class="cmd-chevron">▼</span>
         </div>
       </div>
       <div class="cmd-group-body">
         <table class="cmd-table">
-          <tr><td>ccm launch</td><td>Launch Claude Code with terminal reset on exit</td></tr>
-          <tr><td>ccm launch auto</td><td>Auto-accept most actions</td></tr>
-          <tr><td>ccm launch yolo</td><td>Skip ALL permissions (asks confirmation)</td></tr>
-          <tr><td>ccm launch plan</td><td>Read-only mode</td></tr>
-          <tr><td>ccm launch safe</td><td>Ask for everything (default behavior)</td></tr>
+          <tr><td>ccm setup</td><td>Interactive first-run onboarding wizard</td></tr>
           <tr><td>ccm init [--force]</td><td>Generate .claudeignore for detected project type</td></tr>
           <tr><td>ccm permissions audit [--fix]</td><td>Scan for duplicate/dead permission rules</td></tr>
           <tr><td>ccm statusline [install|remove]</td><td>Install/remove smart status bar in Claude Code</td></tr>
@@ -1297,7 +1315,13 @@ var demos = {
     { type: 'cmd', text: 'ccm switch work' },
     { type: 'blank' },
     { type: 'success', text: '✓ Switched: personal → work (darshan@company.com)' },
-    { type: 'muted', text: '  Please restart Claude Code to use the new authentication.' }
+    { type: 'muted', text: '  Please restart Claude Code to use the new authentication.' },
+    { type: 'blank' },
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm switch --isolated client' },
+    { type: 'blank' },
+    { type: 'success', text: '✓ Isolated session: client (client@agency.io)' },
+    { type: 'muted', text: '  CLAUDE_CONFIG_DIR=~/.claude-isolated/client' }
   ],
   bindings: [
     { type: 'prompt', text: '$ ' },
@@ -1369,6 +1393,23 @@ var demos = {
     { type: 'output', text: '  2026-03-26   11,184,567      158,553   11,343,120' },
     { type: 'blank' },
     { type: 'output', text: 'Grand total:          24,877,123' }
+  ],
+  watch: [
+    { type: 'prompt', text: '$ ' },
+    { type: 'cmd', text: 'ccm watch --threshold 85 --auto' },
+    { type: 'blank' },
+    { type: 'output', text: 'Rate Limit Watcher' },
+    { type: 'muted',  text: '━━━━━━━━━━━━━━━━━━' },
+    { type: 'blank' },
+    { type: 'output', text: '  Account            Usage     Limit     Status' },
+    { type: 'muted',  text: '  -------            -----     -----     ------' },
+    { type: 'warn',   text: '  1: personal        87%       1M/5m     NEAR LIMIT' },
+    { type: 'success', text: '  2: work            34%       1M/5m     OK' },
+    { type: 'success', text: '  3: client          12%       1M/5m     OK' },
+    { type: 'blank' },
+    { type: 'active', text: 'i Account 1 exceeded 85% threshold' },
+    { type: 'success', text: '✓ Auto-switched: personal → work (darshan@company.com)' },
+    { type: 'muted',  text: '  Watching continues. Next check in 60s.' }
   ],
   doctor: [
     { type: 'prompt', text: '$ ' },

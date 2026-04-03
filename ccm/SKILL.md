@@ -1,6 +1,6 @@
 ---
 name: ccm
-description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, launch modes, claudeignore, permission rules, statusline, status bar, or says "ccm", "doctor", "optimize tokens", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "launch auto", "launch yolo", "init", "permissions audit", "statusline".
+description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, profiles, isolated, concurrent sessions, watch, rate limit, auto-switch, dashboard, session archive, setup wizard, recover, usage dashboard, usage compare, claudeignore, permission rules, statusline, status bar, or says "ccm", "doctor", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "init", "permissions audit", "statusline", "ccm watch", "ccm profiles", "ccm setup", "ccm recover".
 allowed-tools: Bash(ccm *), Bash(~/.ccm/bin/ccm *), Bash(curl -fsSL *install.sh*)
 ---
 
@@ -37,7 +37,6 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm switch [id]` | Switch to next account, specific, or project-bound |
 | `ccm undo` | Revert to previous account |
 | `ccm list` | List all managed accounts and project bindings |
-| `ccm status` | Show active account details |
 | `ccm alias <id> <name>` | Set friendly name (e.g., `ccm alias 1 work`) |
 | `ccm reorder <from> <to>` | Reorder account positions |
 | `ccm bind [path] <account>` | Bind project directory to an account |
@@ -48,7 +47,6 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm history` | Show recent switch history |
 | `ccm export <path>` | Export accounts to archive |
 | `ccm import <path>` | Import from archive |
-| `ccm interactive` | Launch interactive menu |
 
 ### Session Management
 
@@ -59,6 +57,9 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm session search <query> [--limit N]` | Full-text search across all sessions |
 | `ccm session relocate <old> <new>` | Update sessions after moving a project folder |
 | `ccm session clean [--dry-run]` | Find and remove orphaned sessions |
+| `ccm session archive [--older-than Nd]` | Compress old sessions to tar.gz |
+| `ccm session restore <archive>` | Restore from archive |
+| `ccm session archives` | List all archives |
 
 ### Environment Snapshots
 
@@ -77,6 +78,8 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm usage summary` | Claude Code footprint overview |
 | `ccm usage top [--count N]` | Top projects by disk usage |
 | `ccm usage history [--days N] [--project <path>]` | Token usage by project and day |
+| `ccm usage dashboard [--days N] [--account <name>]` | Per-account token usage |
+| `ccm usage compare` | Side-by-side account comparison |
 
 ### Health & Maintenance
 
@@ -93,15 +96,19 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm clean cache` | Clean plugin cache (old versions) |
 | `ccm clean all [--dry-run]` | Clean everything safe to clean |
 
-### Launcher
+### Profiles & Monitoring
 
 | Command | Description |
 |---------|-------------|
-| `ccm launch` | Launch Claude Code with terminal reset on exit |
-| `ccm launch auto` | Auto-accept most actions |
-| `ccm launch yolo` | Skip ALL permissions (asks confirmation first) |
-| `ccm launch plan` | Read-only mode |
-| `ccm launch safe` | Ask for everything |
+| `ccm switch --isolated <account>` | Switch with CLAUDE_CONFIG_DIR isolation for concurrent sessions |
+| `ccm profiles list` | List all isolated profiles |
+| `ccm profiles sync <name>` | Sync settings to a profile |
+| `ccm profiles delete <name>` | Remove a profile |
+| `ccm watch --threshold N [--auto]` | Monitor rate limits, auto-switch accounts |
+| `ccm watch stop` | Stop the watcher |
+| `ccm watch status` | Show watcher state |
+| `ccm recover` | Fix inconsistent credential state |
+| `ccm setup` | First-run setup wizard |
 
 ### Project Setup
 
@@ -129,12 +136,6 @@ Shows: context bar, tokens, session cost, duration, burn rate, 5hr/7d rate limit
 | `ccm permissions audit` | Scan for duplicates, contradictions, verbatim rules, bloat |
 | `ccm permissions audit --fix` | Auto-remove duplicate rules |
 
-### Token Optimization
-
-| Command | Description |
-|---------|-------------|
-| `ccm optimize` | Analyze token usage and suggest reductions |
-
 ## 3. Common Workflows
 
 ### First-time setup
@@ -143,15 +144,8 @@ Shows: context bar, tokens, session cost, duration, burn rate, 5hr/7d rate limit
 curl -fsSL https://raw.githubusercontent.com/dr5hn/ccm/main/install.sh | bash
 source ~/.zshrc
 
-# Add your current account
-ccm add
-
-# Give it a friendly name
-ccm alias 1 personal
-
-# Log into another account in Claude Code, then:
-ccm add
-ccm alias 2 work
+# Run the setup wizard (adds accounts, sets aliases, installs statusline)
+ccm setup
 ```
 
 ### Daily account switching
@@ -191,12 +185,21 @@ ccm session search "error handling"       # find across all sessions
 ccm session search "API" --limit 5        # limit results
 ```
 
-### Launch Claude Code with preset modes
+### Concurrent sessions
 ```bash
-ccm launch auto        # auto-accept mode
-ccm launch yolo        # dangerous mode (skip all permissions)
-ccm launch plan        # read-only mode
-ccm launch auto -c     # auto mode + continue last session
+ccm switch --isolated work      # isolated profile for terminal 1
+# In another terminal:
+ccm switch --isolated personal  # isolated profile for terminal 2
+ccm profiles list               # see all active profiles
+ccm profiles sync work          # sync latest settings to a profile
+```
+
+### Rate limit monitoring
+```bash
+ccm watch --threshold 80        # alert when rate limit hits 80%
+ccm watch --threshold 80 --auto # auto-switch accounts at threshold
+ccm watch status                # check watcher state
+ccm watch stop                  # stop monitoring
 ```
 
 ### Install statusline
@@ -220,13 +223,6 @@ ccm clean processes    # kill leaked subagent processes
 ccm clean all --dry-run # preview all cleanups
 ```
 
-### Token optimization
-```bash
-ccm optimize           # see what's inflating your context window
-ccm env audit          # check MCP servers for CLI alternatives
-ccm permissions audit  # find bloated permission rules
-```
-
 ### Moving a project folder
 ```bash
 # After moving ~/old-project to ~/new-location/project:
@@ -244,8 +240,9 @@ ccm env restore before-experiment  # if things break
 
 - After switching accounts, restart Claude Code for changes to take effect
 - `ccm doctor --fix` only removes data older than 30 days — recent data is never touched
-- `ccm optimize` provides estimates — actual token counts vary by model and context
 - Environment snapshots do NOT capture credentials — only configuration
+- Use `ccm switch --isolated` for concurrent sessions in different terminals
+- Install statusline before using `ccm watch` (provides rate limit data)
 - Session relocate updates both session files and memory references
 - Project bindings are auto-cleaned when an account is removed
 - Orphaned process detection is macOS only (ppid=1 unreliable on Linux)

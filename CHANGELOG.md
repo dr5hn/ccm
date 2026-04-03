@@ -2,6 +2,39 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [4.0.0] - 2026-04-03
+
+### Added
+- **`ccm switch --isolated <account>`** — create CLAUDE_CONFIG_DIR-based isolated profiles for true concurrent multi-account sessions in different terminals
+- **`ccm profiles list|sync|delete`** — manage isolated profile directories
+- **`ccm watch --threshold N [--auto]`** — background rate limit monitor that notifies or auto-switches accounts when 5-hour usage exceeds threshold
+- **`ccm watch stop|status`** — stop watcher or show current state and latest rate limit data
+- **`ccm usage dashboard [--days N] [--account <name>]`** — per-account token usage attribution by correlating session JSONL with switch history
+- **`ccm usage compare`** — side-by-side account comparison
+- **`ccm session archive [--older-than Nd] [--project <path>] [--dry-run]`** — compress old sessions to tar.gz archives instead of deleting
+- **`ccm session restore <archive>`** — restore sessions from a compressed archive
+- **`ccm session archives`** — list all saved archives with metadata
+- **`ccm usage sessions [--project <path>] [--days N] [--limit N]`** — per-session token usage and estimated cost breakdown with model-specific pricing (Opus/Sonnet/Haiku)
+- **`ccm session summary [path] [--limit N]`** — show what happened in each session: topic (first user message), tool usage breakdown, and files modified
+- **`ccm setup`** — interactive first-run wizard (dependency check, account import, statusline install, shell hook setup, project init)
+- **`ccm recover`** — detect and fix inconsistent credential state from interrupted operations (checks sequence.json vs files, Keychain, profiles)
+- Statusline now writes rate limit data to `~/.claude-switch-backup/rate-limits.json` for the watcher module
+- Statusline shows bound account indicator when in a bound project directory
+- Statusline uses `CLAUDE_CODE_USER_EMAIL` env var (Claude Code v2.1.51+) as fallback for account detection
+
+### Removed
+- **`ccm status`** — use `ccm list` or Claude Code's native `/status` command
+- **`ccm interactive`** — use direct CLI commands instead
+- **`ccm optimize`** — use Claude Code's native `/insights` command (AI-powered, 3,200 lines)
+- **`ccm launch`** — use Claude Code's native `--permission-mode` flags or `/sandbox` command
+
+### Changed
+- Version bumped to 4.0.0 (major: breaking changes from removed commands)
+- Deprecated commands show migration notices instead of errors
+- Help text updated with all new commands and examples
+- Session module now routes `archive|restore|archives` subcommands
+- Usage module now routes `dashboard|compare` subcommands
+
 ## [3.3.2] - 2026-03-30
 ### Fixed
 - Add error checking to Keychain rename during account reorder to prevent silent data inconsistency
