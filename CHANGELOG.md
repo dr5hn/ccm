@@ -32,8 +32,11 @@ All notable changes to CCM (Claude Code Manager) will be documented in this file
 - Version bumped to 4.0.0 (major: breaking changes from removed commands)
 - Deprecated commands show migration notices instead of errors
 - Help text updated with all new commands and examples
-- Session module now routes `archive|restore|archives` subcommands
-- Usage module now routes `dashboard|compare` subcommands
+- Session module now routes `summary|archive|restore|archives` subcommands
+- Usage module now routes `sessions|dashboard|compare` subcommands
+- Now available via Homebrew: `brew tap dr5hn/tap && brew install ccm`
+- Now available via npm: `npm install -g @dr5hn/ccm`
+- GitHub Actions workflow auto-updates Homebrew formula on new releases
 
 ## [3.3.2] - 2026-03-30
 ### Fixed

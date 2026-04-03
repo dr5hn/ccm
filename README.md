@@ -105,6 +105,8 @@ CCM addresses the most upvoted feature requests in [anthropics/claude-code](http
 - **Top projects** — rank projects by disk usage to identify space hogs
 - **Token history** — per-project and per-day token usage breakdown from session JSONL files
 - **Per-account dashboard** — `ccm usage dashboard` tracks token usage per account
+- **Per-session cost** — `ccm usage sessions` shows token count and estimated cost per session with model-specific pricing
+- **Session summaries** — `ccm session summary` shows topic, tools used, and files modified per session
 - **Account comparison** — `ccm usage compare` side-by-side view
 
 ## Installation
@@ -118,6 +120,24 @@ Installs to `~/.ccm/bin/` and adds to your `$PATH` automatically. No `sudo` requ
 After install, restart your terminal (or `source ~/.zshrc`) and run:
 ```bash
 ccm version
+```
+
+### Install via Homebrew
+
+```bash
+brew tap dr5hn/tap
+brew install ccm
+```
+
+### Install via npm
+
+```bash
+npm install -g @dr5hn/ccm
+```
+
+Or run without installing:
+```bash
+npx @dr5hn/ccm version
 ```
 
 ### Install as a Skill
@@ -216,6 +236,7 @@ ccm recover                    # Detect and fix inconsistent credential state
 ```bash
 ccm session list                       # List all project sessions
 ccm session info <project-path>        # Show sessions for a project (use . for cwd)
+ccm session summary [path] [--limit N] # What happened in each session (topic, tools, files)
 ccm session search <query> [--limit N] # Full-text search across all sessions
 ccm session relocate <old> <new>       # Update sessions after moving a project
 ccm session clean [--dry-run]          # Remove orphaned sessions
@@ -287,6 +308,8 @@ ccm usage summary                      # Usage overview
 ccm usage top [--count N]              # Top projects by disk usage
 ccm usage history [--days N]           # Token usage by project and day
 ccm usage history --project <path>     # Token usage for a specific project
+ccm usage sessions                     # Per-session tokens and estimated cost
+ccm usage sessions --project <path>    # Sessions for a specific project
 ccm usage dashboard                    # Per-account token usage dashboard
 ccm usage compare                      # Side-by-side account comparison
 ```

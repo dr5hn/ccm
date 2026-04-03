@@ -56,6 +56,7 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm session info <project-path>` | Detailed info for a project's sessions |
 | `ccm session search <query> [--limit N]` | Full-text search across all sessions |
 | `ccm session relocate <old> <new>` | Update sessions after moving a project folder |
+| `ccm session summary [path] [--limit N]` | What happened in each session (topic, tools, files) |
 | `ccm session clean [--dry-run]` | Find and remove orphaned sessions |
 | `ccm session archive [--older-than Nd]` | Compress old sessions to tar.gz |
 | `ccm session restore <archive>` | Restore from archive |
@@ -78,6 +79,7 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm usage summary` | Claude Code footprint overview |
 | `ccm usage top [--count N]` | Top projects by disk usage |
 | `ccm usage history [--days N] [--project <path>]` | Token usage by project and day |
+| `ccm usage sessions [--project <path>] [--days N]` | Per-session tokens and estimated cost |
 | `ccm usage dashboard [--days N] [--account <name>]` | Per-account token usage |
 | `ccm usage compare` | Side-by-side account comparison |
 
