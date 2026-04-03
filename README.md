@@ -19,6 +19,35 @@ Claude Code has no built-in multi-account support ([10+ open issues](https://git
 
 CCM is a single bash script that fixes all of this — and it's the only tool that auto-switches accounts when you `cd` into a project directory.
 
+### How CCM compares
+
+| Feature | CCM | Cloak | aisw | Usage Monitor | Native CC |
+|---------|-----|-------|------|---------------|-----------|
+| Multi-account management | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Concurrent sessions | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Project-account bindings | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Auto rate-limit switch | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Per-account usage tracking | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session cleanup (9 targets) | ✅ | ❌ | ❌ | ❌ | Buggy |
+| Health checks (13 checks) | ✅ | ❌ | ❌ | ❌ | MCP only |
+| Environment snapshots | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Permissions audit | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Session archive/restore | ✅ | ❌ | ❌ | ❌ | ❌ |
+| .claudeignore generation | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Orphan process cleanup | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Zero runtime dependencies | ✅ (bash+jq) | ❌ (Node) | ❌ (Rust) | ❌ (Python) | N/A |
+
+### Problems CCM Solves
+
+CCM addresses the most upvoted feature requests in [anthropics/claude-code](https://github.com/anthropics/claude-code/issues):
+
+- **Multi-account switching** — [#24963](https://github.com/anthropics/claude-code/issues/24963), [#22872](https://github.com/anthropics/claude-code/issues/22872), [#27359](https://github.com/anthropics/claude-code/issues/27359), [#37743](https://github.com/anthropics/claude-code/issues/37743) (100+ combined upvotes)
+- **Session cleanup** — [#42077](https://github.com/anthropics/claude-code/issues/42077), [#35164](https://github.com/anthropics/claude-code/issues/35164), [#39540](https://github.com/anthropics/claude-code/issues/39540) (tmp can grow to 100GB+)
+- **Token usage tracking** — [#33978](https://github.com/anthropics/claude-code/issues/33978), [#42436](https://github.com/anthropics/claude-code/issues/42436) (10+ duplicate issues)
+- **Orphaned process cleanup** — [#33947](https://github.com/anthropics/claude-code/issues/33947), [#1935](https://github.com/anthropics/claude-code/issues/1935) (14+ consolidated issues)
+- **Permissions auditing** — [#32904](https://github.com/anthropics/claude-code/issues/32904) (session permissions non-auditable)
+- **.claudeignore generation** — [#30857](https://github.com/anthropics/claude-code/issues/30857) (requested, never built natively)
+
 <p align="center">
   <img src="demos/05-hero.gif" alt="CCM Demo — account switching, health checks, cleanup" width="800">
 </p>
@@ -34,7 +63,8 @@ CCM is a single bash script that fixes all of this — and it's the only tool th
 - **Switch history and undo** — track switches and revert instantly
 - **Health verification** — validate backup integrity for all accounts
 - **Export/Import** — backup and restore account configurations as portable archives
-- **Interactive mode** — menu-driven interface for all operations
+- **Concurrent sessions** — `ccm switch --isolated <account>` for true CLAUDE_CONFIG_DIR-based concurrent sessions in different terminals
+- **Profile management** — `ccm profiles list|sync|delete` for isolated profile directories
 
 ### Session Management
 - **Session listing** — view all Claude Code project sessions with size and age
@@ -42,6 +72,8 @@ CCM is a single bash script that fixes all of this — and it's the only tool th
 - **Session info** — inspect sessions for a specific project directory
 - **Session relocation** — move sessions when a project folder is relocated
 - **Session cleanup** — remove orphaned sessions for projects that no longer exist
+- **Session archive** — compress old sessions to tar.gz instead of deleting
+- **Session restore** — restore from archived sessions
 
 ### Statusline
 - **Smart status bar** — shows context %, tokens, session cost, duration, burn rate, rate limits, directory, branch, and version at the bottom of Claude Code
@@ -49,10 +81,10 @@ CCM is a single bash script that fixes all of this — and it's the only tool th
 - **Color-coded warnings** — context bar and rate limits change color as you approach limits. Compact warning at 80%+
 - **Standalone install** — share with your team without CCM: `curl -fsSL .../statusline.sh | bash`
 
-### Launcher
-- **Launch modes** — `ccm launch auto|yolo|plan|safe` for preset permission modes
-- **Terminal reset** — automatically fixes broken Ctrl-C/Ctrl-D after Claude Code exit in tmux
-- **Pass-through args** — any extra flags forwarded to Claude Code
+### Monitoring & Recovery
+- **Rate limit watcher** — `ccm watch --threshold N [--auto]` monitors rate limits and auto-switches accounts
+- **Error recovery** — `ccm recover` detects and fixes inconsistent credential state
+- **Setup wizard** — `ccm setup` interactive first-run onboarding
 
 ### Project Setup
 - **Init** — auto-generate `.claudeignore` based on detected project type (Node, Python, Go, Rust, Java, Ruby, PHP, .NET, Dart, Swift)
@@ -68,15 +100,12 @@ CCM is a single bash script that fixes all of this — and it's the only tool th
 - **Permissions audit** — find duplicate, contradictory, and dead permission rules in settings.json
 - **Auto-fix** — `ccm doctor --fix` and `ccm permissions audit --fix` resolve safe issues automatically
 
-### Token Optimization
-- **Optimize** — analyze context window footprint and suggest reductions
-- **Plugin audit** — flag unused plugins inflating token usage
-- **CLAUDE.md analysis** — warn if global instructions are too large
-
 ### Usage Statistics
 - **Summary** — total projects, sessions, disk usage at a glance
 - **Top projects** — rank projects by disk usage to identify space hogs
 - **Token history** — per-project and per-day token usage breakdown from session JSONL files
+- **Per-account dashboard** — `ccm usage dashboard` tracks token usage per account
+- **Account comparison** — `ccm usage compare` side-by-side view
 
 ## Installation
 
@@ -135,7 +164,10 @@ Check your current version with `ccm version`.
 ## Quick Start
 
 ```bash
-# Add your current Claude Code account
+# First-run setup wizard
+ccm setup
+
+# Or add accounts manually
 ccm add
 ccm alias 1 personal
 
@@ -147,9 +179,6 @@ ccm alias 2 work
 ccm switch work
 ccm switch personal
 ccm undo                    # revert last switch
-
-# Launch interactive menu
-ccm interactive
 ```
 
 After each switch, restart Claude Code to use the new authentication.
@@ -159,12 +188,13 @@ After each switch, restart Claude Code to use the new authentication.
 ### Account Management
 
 ```bash
+ccm setup                      # Interactive first-run setup wizard
 ccm add                        # Add current Claude Code account
 ccm remove <id>                # Remove by number, email, or alias
 ccm switch [id]                # Switch to next, specific, or project-bound account
+ccm switch --isolated <id>     # Switch with isolated CLAUDE_CONFIG_DIR for concurrent sessions
 ccm undo                       # Revert to the previous account
 ccm list                       # List all managed accounts and bindings
-ccm status                     # Show active account details
 ccm alias <id> <name>          # Set a friendly alias
 ccm reorder <from> <to>        # Reorder account positions
 ccm bind [path] <account>      # Bind project directory to an account
@@ -175,7 +205,10 @@ ccm verify [id]                # Verify backup integrity
 ccm history                    # View switch history
 ccm export <path>              # Export accounts to archive
 ccm import <path>              # Import from archive
-ccm interactive                # Launch interactive menu
+ccm profiles list              # List isolated profile directories
+ccm profiles sync <id>         # Sync profile with main config
+ccm profiles delete <id>       # Delete an isolated profile
+ccm recover                    # Detect and fix inconsistent credential state
 ```
 
 ### Session Management
@@ -186,17 +219,18 @@ ccm session info <project-path>        # Show sessions for a project (use . for 
 ccm session search <query> [--limit N] # Full-text search across all sessions
 ccm session relocate <old> <new>       # Update sessions after moving a project
 ccm session clean [--dry-run]          # Remove orphaned sessions
+ccm session archive <project-path>     # Compress old sessions to tar.gz
+ccm session restore <archive>          # Restore from archived session
+ccm session archives                   # List all archived sessions
 ```
 
-### Launcher
+### Monitoring & Recovery
 
 ```bash
-ccm launch                             # Launch Claude Code with terminal reset
-ccm launch auto                        # Auto-accept most actions
-ccm launch yolo                        # Skip ALL permissions (asks confirmation)
-ccm launch plan                        # Read-only mode
-ccm launch safe                        # Ask for everything
-ccm launch auto -c                     # Auto mode + continue last session
+ccm watch --threshold N                # Monitor rate limits, alert at threshold
+ccm watch --threshold N --auto         # Auto-switch accounts on rate limit
+ccm recover                            # Detect and fix inconsistent credential state
+ccm setup                              # Interactive first-run onboarding
 ```
 
 ### Statusline
@@ -246,12 +280,6 @@ ccm permissions audit                  # Scan for duplicate/dead permission rule
 ccm permissions audit --fix            # Auto-remove duplicates
 ```
 
-### Token Optimization
-
-```bash
-ccm optimize                           # Analyze token usage and suggest reductions
-```
-
 ### Usage Statistics
 
 ```bash
@@ -259,6 +287,8 @@ ccm usage summary                      # Usage overview
 ccm usage top [--count N]              # Top projects by disk usage
 ccm usage history [--days N]           # Token usage by project and day
 ccm usage history --project <path>     # Token usage for a specific project
+ccm usage dashboard                    # Per-account token usage dashboard
+ccm usage compare                      # Side-by-side account comparison
 ```
 
 ### Global Options
@@ -295,15 +325,6 @@ eval "$(ccm hook)"
 # cd ~/work/project → auto-switches to work account
 ```
 
-### Launch Claude Code with Presets
-
-```bash
-ccm launch auto        # auto-accept mode
-ccm launch yolo        # dangerous mode (skip all permissions)
-ccm launch plan        # read-only mode
-ccm launch auto -c     # auto mode + continue last session
-```
-
 ### New Project Setup
 
 ```bash
@@ -338,13 +359,6 @@ ccm clean processes    # kill leaked subagent processes
 ccm clean all --dry-run # preview all cleanups
 ```
 
-### Token Optimization
-
-```bash
-ccm optimize           # full context window analysis
-ccm env audit          # check MCP servers for CLI alternatives
-```
-
 ### Environment Snapshots
 
 ```bash
@@ -371,10 +385,15 @@ CCM focuses on account management, operational health, and environment portabili
 | [ccmanager](https://github.com/kbwo/ccmanager) | Multi-agent session orchestration | 900+ |
 
 **What only CCM does:**
+- Concurrent sessions with isolated CLAUDE_CONFIG_DIR profiles
+- Auto rate-limit switching across accounts
+- Per-account usage tracking and comparison dashboard
 - Project-to-account bindings with shell hook auto-switch
+- Session archival and restore
 - Permissions audit with `--fix` for settings.json
 - `.claudeignore` generation from project type detection
 - Environment snapshots (settings.json + MCP config + CLAUDE.md as a unit)
+- First-run setup wizard for guided onboarding
 - Zero runtime dependencies — single bash script, no package managers needed
 
 ## Security
@@ -404,6 +423,9 @@ When switching accounts, CCM backs up the current account, restores the target, 
 | Account configs & credentials | `~/.claude-switch-backup/` |
 | Environment snapshots | `~/.claude-switch-backup/snapshots/` |
 | Project sessions | `~/.claude/projects/` |
+| Isolated profiles | `~/.claude-switch-backup/profiles/` |
+| Session archives | `~/.claude-switch-backup/archives/` |
+| Rate limit state | `~/.claude-switch-backup/rate-limits.json` |
 | CCM binary | `~/.ccm/bin/ccm` |
 
 ## Troubleshooting
@@ -418,7 +440,7 @@ ccm undo               # revert to previous
 
 ### Claude Code doesn't use the new account after switch
 
-Restart Claude Code after every switch. Verify with `ccm status`.
+Restart Claude Code after every switch. Verify with `ccm list`.
 
 ### Disk usage is high
 

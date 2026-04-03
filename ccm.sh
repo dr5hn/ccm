@@ -6,7 +6,7 @@
 set -euo pipefail
 
 # Configuration
-readonly CCM_VERSION="3.3.2"
+readonly CCM_VERSION="4.0.0"
 readonly BACKUP_DIR="$HOME/.claude-switch-backup"
 readonly SEQUENCE_FILE="$BACKUP_DIR/sequence.json"
 readonly SCHEMA_VERSION="3.1"
@@ -732,9 +732,13 @@ cmd_session() {
     case "${1:-}" in
         list)       session_list ;;
         info)       shift; session_info "$@" ;;
+        summary)    shift; session_summary "$@" ;;
         relocate)   shift; session_relocate "$@" ;;
         clean)      shift; session_clean "$@" ;;
         search)     shift; session_search "$@" ;;
+        archive)    shift; session_archive "$@" ;;
+        restore)    shift; session_restore "$@" ;;
+        archives)   session_archives_list ;;
         "")         show_help session ;;
         *)          log_error "Unknown session command '$1'"; show_help session; exit 1 ;;
     esac
@@ -1049,6 +1053,132 @@ session_clean() {
     done
 
     log_success "Removed $removed orphaned session(s), freed $total_human"
+}
+
+# Purpose: Shows summary of what happened in each session for a project
+# Parameters: [project-path] [--limit N]
+# Returns: 0
+# Usage: session_summary . | session_summary ~/my-app --limit 5
+session_summary() {
+    local target_path="."
+    local limit=5
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --limit) limit="$2"; shift 2 ;;
+            *)       target_path="$1"; shift ;;
+        esac
+    done
+
+    if ! [[ "$limit" =~ ^[0-9]+$ ]] || [[ "$limit" -eq 0 ]]; then
+        log_error "--limit must be a positive integer."
+        return 1
+    fi
+
+    local abs_path
+    abs_path=$(cd "$target_path" 2>/dev/null && pwd || echo "$target_path")
+    local encoded_path
+    encoded_path=$(echo "$abs_path" | sed 's|/|-|g')
+    local project_dir="$CLAUDE_PROJECTS_DIR/$encoded_path"
+
+    if [[ ! -d "$project_dir" ]]; then
+        log_error "No sessions found for: $abs_path"
+        return 1
+    fi
+
+    local display_path
+    display_path=$(truncate_path "$abs_path")
+
+    echo -e "${COLOR_BOLD}Session Summaries — $display_path${COLOR_RESET}"
+    echo ""
+
+    local shown=0
+    # Sort JSONL files by modification time, newest first
+    while IFS= read -r jsonl_file; do
+        [[ -f "$jsonl_file" ]] || continue
+        shown=$((shown + 1))
+        [[ "$shown" -gt "$limit" ]] && break
+
+        local fname
+        fname=$(basename "$jsonl_file" .jsonl)
+        local short_id="${fname:0:8}"
+
+        # Extract summary data in a single jq pass
+        local summary
+        summary=$(jq -s '
+            {
+                first_user: (
+                    [.[] | select(.type == "user") | .message.content |
+                        if type == "array" then
+                            map(select(.type == "text")) | first | .text
+                        elif type == "string" then .
+                        else null end
+                    ] | map(select(. != null and . != "null")) | first // "—"
+                ),
+                user_msgs: ([.[] | select(.type == "user")] | length),
+                asst_msgs: ([.[] | select(.type == "assistant")] | length),
+                tools: (
+                    [.[] | select(.type == "assistant") | .message.content[]? |
+                        select(.type == "tool_use") | .name] |
+                    group_by(.) | map({name: .[0], count: length}) |
+                    sort_by(-.count) | .[0:5]
+                ),
+                files_modified: (
+                    [.[] | select(.type == "assistant") | .message.content[]? |
+                        select(.type == "tool_use" and (.name == "Write" or .name == "Edit")) |
+                        (.input.file_path // .input.path // empty)] |
+                    unique | .[0:8]
+                ),
+                first_ts: ([.[] | .timestamp // empty] | map(select(. != null)) | first // ""),
+                last_ts: ([.[] | .timestamp // empty] | map(select(. != null)) | last // ""),
+                tokens: (
+                    [.[] | select(.type == "assistant" and .message.usage != null) |
+                        ((.message.usage.input_tokens // 0) + (.message.usage.output_tokens // 0) +
+                         (.message.usage.cache_creation_input_tokens // 0) + (.message.usage.cache_read_input_tokens // 0))] | add // 0
+                )
+            }
+        ' "$jsonl_file" 2>/dev/null)
+
+        [[ -z "$summary" ]] && continue
+
+        local first_user user_msgs asst_msgs first_ts tokens
+        first_user=$(echo "$summary" | jq -r '.first_user' | head -1)
+        user_msgs=$(echo "$summary" | jq -r '.user_msgs')
+        asst_msgs=$(echo "$summary" | jq -r '.asst_msgs')
+        first_ts=$(echo "$summary" | jq -r '.first_ts')
+        tokens=$(echo "$summary" | jq -r '.tokens')
+
+        # Truncate first user message
+        [[ ${#first_user} -gt 80 ]] && first_user="${first_user:0:77}..."
+
+        local date_display="${first_ts:0:10}"
+        local tok_fmt
+        tok_fmt=$(format_token_count "$tokens")
+
+        echo -e "  ${COLOR_BOLD}${short_id}...${COLOR_RESET}  ${COLOR_CYAN}$date_display${COLOR_RESET}  ${user_msgs} user / ${asst_msgs} assistant msgs  ${tok_fmt} tokens"
+
+        # First user message as topic
+        if [[ "$first_user" != "—" && -n "$first_user" ]]; then
+            echo -e "  ${COLOR_GREEN}Topic:${COLOR_RESET} $first_user"
+        fi
+
+        # Tool usage
+        local tools_str
+        tools_str=$(echo "$summary" | jq -r '.tools[] | "\(.name)×\(.count)"' 2>/dev/null | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+        [[ -n "$tools_str" ]] && echo -e "  ${COLOR_YELLOW}Tools:${COLOR_RESET} $tools_str"
+
+        # Files modified
+        local files_str
+        files_str=$(echo "$summary" | jq -r '.files_modified[]' 2>/dev/null | sed "s|$HOME|~|g" | sed 's|.*/||' | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+        [[ -n "$files_str" ]] && echo -e "  ${COLOR_CYAN}Files:${COLOR_RESET} $files_str"
+
+        echo ""
+    done < <(find "$project_dir" -maxdepth 1 -name "*.jsonl" -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null)
+
+    local total
+    total=$(find "$project_dir" -maxdepth 1 -name "*.jsonl" 2>/dev/null | wc -l | tr -d ' ')
+    local remaining=$((total - shown))
+    [[ "$remaining" -gt 0 ]] && echo "  $remaining more sessions — use --limit $((shown + 10)) to see more"
 }
 
 # Purpose: Full-text search across all JSONL session files
@@ -1843,93 +1973,34 @@ cmd_verify() {
 }
 
 # Show account status
-cmd_status() {
-    # --short flag for statusline integration (no colors, single line)
-    if [[ "${1:-}" == "--short" ]]; then
-        if [[ ! -f "$SEQUENCE_FILE" ]]; then
-            echo "no accounts"
-            return 0
-        fi
-        local email
-        email=$(get_current_account)
-        if [[ "$email" == "none" ]]; then
-            echo "no account"
-            return 0
-        fi
-        local account_num
-        account_num=$(jq -r --arg email "$email" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-        if [[ -n "$account_num" ]]; then
-            local alias_name
-            alias_name=$(jq -r --arg n "$account_num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE" 2>/dev/null)
-            if [[ -n "$alias_name" ]]; then
-                echo "$alias_name"
-            else
-                echo "$email"
-            fi
+# Purpose: Returns short account label for statusline integration (no colors, single line)
+# Parameters: None
+# Returns: Account alias or email on stdout
+# Usage: get_active_account_label
+get_active_account_label() {
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        echo "no accounts"
+        return 0
+    fi
+    local email
+    email=$(get_current_account)
+    if [[ "$email" == "none" ]]; then
+        echo "no account"
+        return 0
+    fi
+    local account_num
+    account_num=$(jq -r --arg email "$email" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
+    if [[ -n "$account_num" ]]; then
+        local alias_name
+        alias_name=$(jq -r --arg n "$account_num" '.accounts[$n].alias // empty' "$SEQUENCE_FILE" 2>/dev/null)
+        if [[ -n "$alias_name" ]]; then
+            echo "$alias_name"
         else
             echo "$email"
         fi
-        return 0
-    fi
-
-    if [[ ! -f "$SEQUENCE_FILE" ]]; then
-        log_info "No accounts are managed yet."
-        exit 0
-    fi
-
-    migrate_sequence_file
-
-    local current_email
-    current_email=$(get_current_account)
-
-    echo -e "${COLOR_BOLD}Claude Code Account Status${COLOR_RESET}"
-    echo ""
-
-    if [[ "$current_email" != "none" ]]; then
-        local account_num
-        account_num=$(jq -r --arg email "$current_email" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-
-        if [[ -n "$account_num" ]]; then
-            local account_info
-            account_info=$(jq -r --arg num "$account_num" '.accounts[$num]' "$SEQUENCE_FILE")
-
-            local alias last_used usage_count health
-            alias=$(echo "$account_info" | jq -r '.alias // "none"')
-            last_used=$(echo "$account_info" | jq -r '.lastUsed // "unknown"')
-            usage_count=$(echo "$account_info" | jq -r '.usageCount // 0')
-            health=$(echo "$account_info" | jq -r '.healthStatus // "unknown"')
-
-            echo -e "${COLOR_BOLD}Active Account:${COLOR_RESET} $current_email ${COLOR_GREEN}(Account-$account_num)${COLOR_RESET}"
-            echo -e "  Alias: $alias"
-            echo -e "  Usage count: ${usage_count}x"
-
-            if [[ "$last_used" != "unknown" && "$last_used" != "null" ]]; then
-                local last_used_formatted
-                last_used_formatted=$(format_iso_date "$last_used")
-                echo -e "  Last used: $last_used_formatted"
-            fi
-
-            case "$health" in
-                healthy) echo -e "  Health: ${COLOR_GREEN}●${COLOR_RESET} healthy" ;;
-                degraded) echo -e "  Health: ${COLOR_YELLOW}●${COLOR_RESET} degraded" ;;
-                unhealthy) echo -e "  Health: ${COLOR_RED}●${COLOR_RESET} unhealthy" ;;
-                *) echo -e "  Health: unknown" ;;
-            esac
-        else
-            echo -e "${COLOR_BOLD}Active Account:${COLOR_RESET} $current_email ${COLOR_YELLOW}(not managed)${COLOR_RESET}"
-        fi
     else
-        echo -e "${COLOR_BOLD}Active Account:${COLOR_RESET} ${COLOR_RED}None${COLOR_RESET}"
+        echo "$email"
     fi
-
-    echo ""
-    local total_accounts
-    total_accounts=$(jq '.accounts | length' "$SEQUENCE_FILE")
-    echo -e "${COLOR_BOLD}Total managed accounts:${COLOR_RESET} $total_accounts"
-
-    local schema_version
-    schema_version=$(jq -r '.schemaVersion // "1.0"' "$SEQUENCE_FILE")
-    echo -e "${COLOR_BOLD}Data version:${COLOR_RESET} $schema_version"
 }
 
 # Show switch history
@@ -2863,230 +2934,6 @@ session_relocate() {
     log_info "accessible from: ${COLOR_GREEN}$new_path${COLOR_RESET}"
 }
 
-# Interactive mode
-# Purpose: Launches a menu-driven interface for account management
-# Parameters: None
-# Returns: Runs until user quits
-# Usage: cmd_interactive
-cmd_interactive() {
-    if [[ ! -f "$SEQUENCE_FILE" ]]; then
-        log_info "No accounts are managed yet."
-        first_run_setup || exit 1
-    fi
-
-    migrate_sequence_file
-
-    while true; do
-        clear
-        echo -e "${COLOR_GREEN}"
-        echo ' ██████╗ ██████╗███╗   ███╗'
-        echo '██╔════╝██╔════╝████╗ ████║'
-        echo '██║     ██║     ██╔████╔██║'
-        echo '██║     ██║     ██║╚██╔╝██║'
-        echo '╚██████╗╚██████╗██║ ╚═╝ ██║'
-        echo -e ' ╚═════╝ ╚═════╝╚═╝     ╚═╝'"${COLOR_RESET}"
-        echo ""
-        echo -e "${COLOR_BOLD}The power-user toolkit for Claude Code${COLOR_RESET}  ${COLOR_GREEN}v${CCM_VERSION}${COLOR_RESET}"
-        echo ""
-
-        # Show current account
-        local current_email
-        current_email=$(get_current_account)
-
-        if [[ "$current_email" != "none" ]]; then
-            local account_num
-            account_num=$(jq -r --arg email "$current_email" '.accounts | to_entries[] | select(.value.email == $email) | .key' "$SEQUENCE_FILE" 2>/dev/null)
-            if [[ -n "$account_num" ]]; then
-                local alias
-                alias=$(jq -r --arg num "$account_num" '.accounts[$num].alias // "no alias"' "$SEQUENCE_FILE")
-                echo -e "${COLOR_GREEN}●${COLOR_RESET} Current: Account-$account_num ($current_email) [$alias]"
-            else
-                echo -e "${COLOR_YELLOW}●${COLOR_RESET} Current: $current_email (not managed)"
-            fi
-        else
-            echo -e "${COLOR_RED}●${COLOR_RESET} No active account"
-        fi
-        echo ""
-
-        echo -e "${COLOR_BOLD}Available Accounts:${COLOR_RESET}"
-        local idx=1
-        unset account_map
-        declare -A account_map
-        while IFS= read -r line; do
-            local num email alias is_active
-            num=$(echo "$line" | jq -r '.num')
-            email=$(echo "$line" | jq -r '.email')
-            alias=$(echo "$line" | jq -r '.alias // ""')
-            is_active=$(echo "$line" | jq -r '.isActive')
-
-            account_map[$idx]=$num
-
-            local display="  $idx) Account-$num: $email"
-            if [[ -n "$alias" ]]; then
-                display+=" ${COLOR_CYAN}[$alias]${COLOR_RESET}"
-            fi
-            if [[ "$is_active" == "true" ]]; then
-                display+=" ${COLOR_GREEN}(active)${COLOR_RESET}"
-            fi
-            echo -e "$display"
-            ((idx++))
-        done < <(jq -c --arg active "$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")" '
-            .sequence[] as $num |
-            .accounts["\($num)"] + {
-                num: $num,
-                isActive: (if "\($num)" == $active then "true" else "false" end)
-            }
-        ' "$SEQUENCE_FILE")
-
-        echo ""
-        echo -e "${COLOR_BOLD}Actions:${COLOR_RESET}"
-        echo "  s) Switch to next account"
-        echo "  a) Add current account"
-        echo "  v) Verify all accounts"
-        echo "  h) View switch history"
-        echo "  u) Undo last switch"
-        echo ""
-        echo -e "${COLOR_BOLD}Tools:${COLOR_RESET}"
-        echo "  sl) Session list"
-        echo "  sc) Session clean (dry run)"
-        echo "  us) Usage summary"
-        echo "  ut) Usage top"
-        echo "  es) Env snapshot"
-        echo "  el) Env snapshots list"
-        echo "  ea) Env audit"
-        echo ""
-        echo -e "${COLOR_BOLD}Maintenance:${COLOR_RESET}"
-        echo "  dr) Doctor (health check)"
-        echo "  cl) Clean all (dry run)"
-        echo "  op) Optimize tokens"
-        echo ""
-        echo "  q) Quit"
-        echo ""
-        echo -n "Select an option (1-$((idx-1)) or action): "
-
-        read -r choice
-
-        case "$choice" in
-            [0-9]*)
-                if [[ -n "${account_map[$choice]:-}" ]]; then
-                    local target_num="${account_map[$choice]}"
-                    echo ""
-                    perform_switch "$target_num"
-                    echo ""
-                    read -p "Press Enter to continue..."
-                else
-                    log_error "Invalid selection"
-                    sleep 1
-                fi
-                ;;
-            s|S)
-                echo ""
-                cmd_switch
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            a|A)
-                echo ""
-                cmd_add_account
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            v|V)
-                echo ""
-                cmd_verify
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            h|H)
-                echo ""
-                cmd_history
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            u|U)
-                echo ""
-                cmd_undo
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            sl|SL)
-                echo ""
-                session_list
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            sc|SC)
-                echo ""
-                session_clean --dry-run
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            us|US)
-                echo ""
-                usage_summary
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            ut|UT)
-                echo ""
-                usage_top
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            es|ES)
-                echo ""
-                read -rp "Snapshot name (leave empty for auto): " snap_name
-                if [[ -n "$snap_name" ]]; then
-                    env_snapshot "$snap_name"
-                else
-                    env_snapshot
-                fi
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            el|EL)
-                echo ""
-                env_list
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            ea|EA)
-                echo ""
-                env_audit
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            dr|DR)
-                echo ""
-                doctor_scan 0
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            cl|CL)
-                echo ""
-                clean_all --dry-run
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            op|OP)
-                echo ""
-                cmd_optimize
-                echo ""
-                read -p "Press Enter to continue..."
-                ;;
-            q|Q)
-                echo ""
-                log_info "Goodbye!"
-                exit 0
-                ;;
-            *)
-                log_error "Invalid option"
-                sleep 1
-                ;;
-        esac
-    done
-}
-
 # Show version
 # Purpose: Prints the CCM version string
 # Parameters: None
@@ -3171,25 +3018,70 @@ show_help() {
             echo "  Zsh:  Uses chpwd hook (native directory change event)"
             echo "  Bash: Wraps cd/pushd/popd with auto-switch check"
             ;;
-        optimize)
-            echo -e "${COLOR_BOLD}ccm optimize — Token Usage Analysis${COLOR_RESET}"
+        profiles)
+            echo -e "${COLOR_BOLD}ccm profiles — Isolated Profile Management${COLOR_RESET}"
             echo ""
-            echo "Usage: ccm optimize"
+            echo "Usage: ccm profiles <subcommand>"
             echo ""
-            echo "Analyzes token consumption footprint and provides actionable"
-            echo "recommendations to reduce per-request overhead."
+            echo -e "${COLOR_BOLD}Subcommands:${COLOR_RESET}"
+            echo "  list                     List all isolated profiles with status"
+            echo "  sync <name>              Sync settings/MCP config to a profile"
+            echo "  delete <name>            Remove an isolated profile"
             echo ""
-            echo -e "${COLOR_BOLD}Checks:${COLOR_RESET}"
-            echo "  Global CLAUDE.md         Warns if > 4000 chars (~1000 tokens)"
-            echo "  Project CLAUDE.md        Warns if > 4000 chars (~1000 tokens)"
-            echo "  MEMORY.md                Warns if > 200 lines (only first 200 loaded)"
-            echo "  Plugins                  Warns if > 15 plugins (~500 tokens each)"
-            echo "  MCP servers              Flags servers with CLI alternatives"
-            echo "  Hooks                    Warns if hook prompts exceed 2000 chars"
-            echo "  Permissions              Warns if allowlist entries > 50"
+            echo "Profiles are created via 'ccm switch --isolated <account>'."
+            echo "Each profile uses CLAUDE_CONFIG_DIR for true concurrent sessions."
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
-            echo "  ccm optimize"
+            echo "  ccm switch --isolated work     # create and activate profile"
+            echo "  ccm profiles list              # show all profiles"
+            echo "  ccm profiles sync work         # sync settings to profile"
+            echo "  ccm profiles delete work       # remove profile"
+            ;;
+        watch)
+            echo -e "${COLOR_BOLD}ccm watch — Rate Limit Watcher${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm watch [options]"
+            echo ""
+            echo -e "${COLOR_BOLD}Options:${COLOR_RESET}"
+            echo "  --threshold N            Notify when 5h usage hits N% (default: 85)"
+            echo "  --auto                   Auto-switch to next available account"
+            echo "  stop                     Stop the background watcher"
+            echo "  status                   Show current watcher state"
+            echo ""
+            echo "Requires: ccm statusline installed (provides rate limit data)."
+            echo ""
+            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm watch --threshold 85          # notify at 85%"
+            echo "  ccm watch --threshold 80 --auto   # auto-switch at 80%"
+            echo "  ccm watch stop                    # stop watching"
+            echo "  ccm watch status                  # show watcher state"
+            ;;
+        recover)
+            echo -e "${COLOR_BOLD}ccm recover — Error Recovery${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm recover"
+            echo ""
+            echo "Detects and fixes inconsistent credential state from"
+            echo "interrupted switch or reorder operations."
+            echo ""
+            echo -e "${COLOR_BOLD}Checks:${COLOR_RESET}"
+            echo "  sequence.json vs credential files"
+            echo "  Keychain entries vs sequence.json (macOS)"
+            echo "  Active account vs credential state"
+            echo "  Profile directory validity"
+            ;;
+        setup)
+            echo -e "${COLOR_BOLD}ccm setup — First-Run Setup Wizard${COLOR_RESET}"
+            echo ""
+            echo "Usage: ccm setup"
+            echo ""
+            echo "Interactive wizard that guides you through:"
+            echo "  1. Dependency check (bash 4.4+, jq, curl)"
+            echo "  2. Claude Code detection"
+            echo "  3. Auto-import current account"
+            echo "  4. Statusline installation"
+            echo "  5. Shell hook setup"
+            echo "  6. Project initialization"
             ;;
         session)
             echo -e "${COLOR_BOLD}ccm session — Session Management${COLOR_RESET}"
@@ -3199,9 +3091,14 @@ show_help() {
             echo -e "${COLOR_BOLD}Subcommands:${COLOR_RESET}"
             echo "  list                     List all Claude Code project sessions"
             echo "  info <project-path>      Show detailed info for a project's sessions"
+            echo "  summary [path] [--limit N]  Show what happened in each session (topic, tools, files)"
             echo "  relocate <old> <new>     Relocate project sessions after moving a folder"
             echo "  clean [--dry-run]        Remove orphaned sessions (projects no longer on disk)"
             echo "  search <query> [--limit N]  Full-text search across sessions (default: 10)"
+            echo "  archive [--older-than Nd] [--project <path>] [--dry-run]"
+            echo "                           Compress old sessions to tar.gz archives"
+            echo "  restore <archive-name>   Restore sessions from an archive"
+            echo "  archives                 List all saved archives"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
             echo "  ccm session list"
@@ -3212,6 +3109,10 @@ show_help() {
             echo "  ccm session clean"
             echo "  ccm session search 'error handling'"
             echo "  ccm session search 'API' --limit 5"
+            echo "  ccm session archive --older-than 30d"
+            echo "  ccm session archive --dry-run"
+            echo "  ccm session archives"
+            echo "  ccm session restore my-project-20260401.tar.gz"
             ;;
         env)
             echo -e "${COLOR_BOLD}ccm env — Environment Management${COLOR_RESET}"
@@ -3242,6 +3143,11 @@ show_help() {
             echo "  top [--count N]          Show top N projects by disk usage (default: 10)"
             echo "  history [--days N] [--project <path>]"
             echo "                           Token usage breakdown by project and day (default: 7)"
+            echo "  sessions [--project <path>] [--days N] [--limit N]"
+            echo "                           Per-session tokens, cost, and duration (default: cwd)"
+            echo "  dashboard [--days N] [--account <name>]"
+            echo "                           Per-account token usage dashboard"
+            echo "  compare [--days N]       Side-by-side account comparison"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
             echo "  ccm usage summary"
@@ -3250,27 +3156,12 @@ show_help() {
             echo "  ccm usage history"
             echo "  ccm usage history --days 30"
             echo "  ccm usage history --project ~/my-app"
-            ;;
-        launch)
-            echo -e "${COLOR_BOLD}ccm launch — Claude Code Launcher${COLOR_RESET}"
-            echo ""
-            echo "Usage: ccm launch [mode] [claude args...]"
-            echo ""
-            echo -e "${COLOR_BOLD}Modes:${COLOR_RESET}"
-            echo "  auto                     Auto-accept most actions"
-            echo "  yolo                     Skip ALL permission checks (confirmation required)"
-            echo "  plan                     Read-only mode (no writes)"
-            echo "  safe                     Ask for everything (default Claude behavior)"
-            echo ""
-            echo "Automatically resets terminal state on exit (fixes broken Ctrl-C in tmux)."
-            echo "Any extra arguments are passed through to claude."
-            echo ""
-            echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
-            echo "  ccm launch               # normal launch with terminal reset"
-            echo "  ccm launch auto          # auto mode"
-            echo "  ccm launch yolo          # dangerous mode (asks for confirmation)"
-            echo "  ccm launch plan          # read-only mode"
-            echo "  ccm launch auto -c       # auto mode + continue last session"
+            echo "  ccm usage sessions"
+            echo "  ccm usage sessions --project ~/my-app"
+            echo "  ccm usage sessions --days 7 --limit 50"
+            echo "  ccm usage dashboard"
+            echo "  ccm usage dashboard --days 30 --account work"
+            echo "  ccm usage compare"
             ;;
         init)
             echo -e "${COLOR_BOLD}ccm init — Project Setup${COLOR_RESET}"
@@ -3333,12 +3224,12 @@ show_help() {
             echo "  add                                Add current account to managed accounts"
             echo "  remove <num|email|alias>           Remove an account"
             echo "  list                               List all managed accounts"
-            echo "  status                             Show active account details"
             echo "  alias <num|email> <alias>          Set friendly name for an account"
             echo "  reorder <from> <to>                Reorder account positions"
             echo ""
             echo -e "${COLOR_BOLD}Switching:${COLOR_RESET}"
             echo "  switch [num|email|alias]           Switch account (next, specific, or project-bound)"
+            echo "  switch --isolated <account>        Switch with CLAUDE_CONFIG_DIR isolation"
             echo "  bind [path] <account>              Bind project directory to an account"
             echo "  unbind [path]                      Remove project binding"
             echo "  bind list                          Show all project bindings"
@@ -3346,46 +3237,49 @@ show_help() {
             echo "  undo                               Undo last account switch"
             echo "  history                            Show account switch history"
             echo ""
+            echo -e "${COLOR_BOLD}Profiles & Monitoring:${COLOR_RESET}"
+            echo "  profiles <subcommand>              Manage isolated CLAUDE_CONFIG_DIR profiles"
+            echo "  watch [--threshold N] [--auto]     Monitor rate limits, auto-switch accounts"
+            echo ""
             echo -e "${COLOR_BOLD}Verification & Backup:${COLOR_RESET}"
             echo "  verify [num|email]                 Verify account backups"
             echo "  export <path>                      Export accounts to archive"
             echo "  import <path>                      Import accounts from archive"
+            echo "  recover                            Fix inconsistent credential state"
             echo ""
             echo -e "${COLOR_BOLD}Modules:${COLOR_RESET}"
-            echo "  session <subcommand>               Manage Claude Code sessions"
+            echo "  session <subcommand>               Manage sessions (list|info|search|relocate|clean|archive)"
             echo "  env <subcommand>                   Environment snapshots & audit"
-            echo "  usage <subcommand>                 Usage statistics & reporting"
+            echo "  usage <subcommand>                 Usage statistics, dashboard & reporting"
             echo ""
             echo -e "${COLOR_BOLD}Maintenance:${COLOR_RESET}"
-            echo "  doctor [--fix]                         Diagnose and fix Claude Code health issues"
-            echo "  clean <target> [--dry-run]             Clean up cache, logs, telemetry, tmp, processes"
-            echo "  optimize                               Analyze and optimize token usage"
-            echo "  permissions <subcommand>               Audit and fix permission rules"
+            echo "  doctor [--fix]                     Diagnose and fix Claude Code health issues"
+            echo "  clean <target> [--dry-run]         Clean up cache, logs, telemetry, tmp, processes"
+            echo "  permissions <subcommand>           Audit and fix permission rules"
             echo ""
-            echo -e "${COLOR_BOLD}Launcher & Setup:${COLOR_RESET}"
-            echo "  launch [auto|yolo|plan|safe]           Launch Claude Code with preset mode + terminal fix"
-            echo "  init [--force]                         Generate .claudeignore for this project"
-            echo "  statusline [install|remove]            Install CCM statusline in Claude Code"
+            echo -e "${COLOR_BOLD}Setup:${COLOR_RESET}"
+            echo "  setup                              First-run setup wizard"
+            echo "  init [--force]                     Generate .claudeignore for this project"
+            echo "  statusline [install|remove]        Install CCM statusline in Claude Code"
             echo ""
             echo -e "${COLOR_BOLD}Other:${COLOR_RESET}"
-            echo "  interactive                        Launch interactive menu mode"
             echo "  help [command]                     Show help (or help for a command)"
             echo "  version                            Show version"
             echo "  --no-color                         Disable colored output"
             echo ""
             echo -e "${COLOR_BOLD}Examples:${COLOR_RESET}"
+            echo "  ccm setup"
             echo "  ccm add"
             echo "  ccm alias 1 work"
             echo "  ccm switch work"
-            echo "  ccm launch auto"
-            echo "  ccm launch yolo"
-            echo "  ccm init"
+            echo "  ccm switch --isolated work"
+            echo "  ccm watch --threshold 85 --auto"
             echo "  ccm bind . work"
+            echo "  ccm usage dashboard"
+            echo "  ccm session archive --older-than 30d"
             echo "  ccm permissions audit"
-            echo "  ccm usage history --days 30"
-            echo "  ccm session search 'error handling'"
             echo "  ccm clean tmp"
-            echo "  ccm help launch"
+            echo "  ccm help profiles"
             ;;
     esac
 }
@@ -3804,6 +3698,9 @@ cmd_usage() {
         summary)    usage_summary ;;
         top)        shift; usage_top "$@" ;;
         history)    shift; usage_history "$@" ;;
+        sessions)   shift; usage_sessions "$@" ;;
+        dashboard)  shift; usage_dashboard "$@" ;;
+        compare)    shift; usage_compare "$@" ;;
         "")         show_help usage ;;
         *)          log_error "Unknown usage command '$1'"; show_help usage; exit 1 ;;
     esac
@@ -4149,6 +4046,235 @@ usage_history() {
     printf "  Cache write tokens:    %s\n" "$(printf '%'\''d' "$grand_cache_create" 2>/dev/null || echo "$grand_cache_create")"
     printf "  Cache read tokens:     %s\n" "$(printf '%'\''d' "$grand_cache_read" 2>/dev/null || echo "$grand_cache_read")"
     printf "  ${COLOR_BOLD}Grand total:           %s${COLOR_RESET}\n" "$(printf '%'\''d' "$grand_total" 2>/dev/null || echo "$grand_total")"
+}
+
+# Purpose: Shows per-session token usage and estimated cost for a project
+# Parameters: [--project <path>] [--days N] [--limit N]
+# Returns: 0
+# Usage: usage_sessions | usage_sessions --project . | usage_sessions --days 30
+usage_sessions() {
+    local filter_project=""
+    local days=0
+    local limit=20
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --project) filter_project="$2"; shift 2 ;;
+            --days)    days="$2"; shift 2 ;;
+            --limit)   limit="$2"; shift 2 ;;
+            *)         log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    if [[ -n "$days" ]] && ! [[ "$days" =~ ^[0-9]+$ ]]; then
+        log_error "--days must be a positive integer."
+        return 1
+    fi
+    if ! [[ "$limit" =~ ^[0-9]+$ ]] || [[ "$limit" -eq 0 ]]; then
+        log_error "--limit must be a positive integer."
+        return 1
+    fi
+
+    if [[ ! -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        log_error "Claude Code projects directory not found: $CLAUDE_PROJECTS_DIR"
+        return 1
+    fi
+
+    # If no project specified, default to current directory
+    if [[ -z "$filter_project" ]]; then
+        filter_project="$(pwd)"
+    fi
+
+    # Resolve to absolute path
+    local abs_project
+    abs_project=$(cd "$filter_project" 2>/dev/null && pwd || echo "$filter_project")
+
+    # Encode the project path to find the session directory
+    local encoded_path
+    encoded_path=$(echo "$abs_project" | sed 's|/|-|g')
+    local project_dir="$CLAUDE_PROJECTS_DIR/$encoded_path"
+
+    if [[ ! -d "$project_dir" ]]; then
+        log_error "No sessions found for: $abs_project"
+        return 1
+    fi
+
+    local display_path
+    display_path=$(truncate_path "$abs_project")
+
+    echo -e "${COLOR_BOLD}Session Usage — $display_path${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}═══════════════════════════════════════════════════════════${COLOR_RESET}"
+    echo ""
+
+    show_progress "Analyzing sessions"
+
+    local now
+    now=$(date +%s)
+    local cutoff_seconds=0
+    [[ "$days" -gt 0 ]] && cutoff_seconds=$((days * 86400))
+
+    # Model pricing (per 1M tokens, USD)
+    # Format: input|output|cache_read
+    declare -A MODEL_PRICING
+    MODEL_PRICING["claude-opus-4-6"]="15|75|1.875"
+    MODEL_PRICING["claude-opus-4-5-20250414"]="15|75|1.875"
+    MODEL_PRICING["claude-sonnet-4-6"]="3|15|0.30"
+    MODEL_PRICING["claude-sonnet-4-5-20250514"]="3|15|0.30"
+    MODEL_PRICING["claude-haiku-4-5-20251001"]="0.80|4|0.08"
+
+    local session_data=()
+    local grand_input=0 grand_output=0 grand_cache=0 grand_msgs=0
+    local grand_cost_cents=0
+
+    while IFS= read -r -d '' jsonl_file; do
+        local fname
+        fname=$(basename "$jsonl_file" .jsonl)
+        local short_id="${fname:0:8}"
+
+        # Check file age if --days specified
+        if [[ "$cutoff_seconds" -gt 0 ]]; then
+            local mtime
+            mtime=$(get_mtime "$jsonl_file")
+            local age=$((now - mtime))
+            [[ "$age" -gt "$cutoff_seconds" ]] && continue
+        fi
+
+        # Single jq pass for all session metrics
+        local stats
+        stats=$(jq -s '
+            [.[] | select(.type == "assistant" and .message.usage != null)] |
+            {
+                messages: length,
+                input: (map(.message.usage.input_tokens // 0) | add // 0),
+                output: (map(.message.usage.output_tokens // 0) | add // 0),
+                cache_create: (map(.message.usage.cache_creation_input_tokens // 0) | add // 0),
+                cache_read: (map(.message.usage.cache_read_input_tokens // 0) | add // 0),
+                model: ([.[] | .message.model // .model // empty] | first // "unknown"),
+                first_ts: ([.[].timestamp // empty] | first // ""),
+                last_ts: ([.[].timestamp // empty] | last // "")
+            }
+        ' "$jsonl_file" 2>/dev/null)
+
+        [[ -z "$stats" ]] && continue
+
+        local msgs input output cc cr model first_ts last_ts
+        msgs=$(echo "$stats" | jq -r '.messages')
+        input=$(echo "$stats" | jq -r '.input')
+        output=$(echo "$stats" | jq -r '.output')
+        cc=$(echo "$stats" | jq -r '.cache_create')
+        cr=$(echo "$stats" | jq -r '.cache_read')
+        model=$(echo "$stats" | jq -r '.model')
+        first_ts=$(echo "$stats" | jq -r '.first_ts')
+        last_ts=$(echo "$stats" | jq -r '.last_ts')
+
+        [[ "$msgs" -eq 0 ]] && continue
+
+        local total=$((input + output + cc + cr))
+
+        # Calculate cost using model pricing
+        local cost_cents=0
+        local pricing="${MODEL_PRICING[$model]:-}"
+        if [[ -n "$pricing" ]]; then
+            IFS='|' read -r price_in price_out price_cache <<< "$pricing"
+            # Cost in cents: (tokens / 1M) * price_per_M * 100
+            local cost_in cost_out cost_cr
+            cost_in=$(awk -v t="$((input + cc))" -v p="$price_in" 'BEGIN{printf "%.0f", (t / 1000000) * p * 100}')
+            cost_out=$(awk -v t="$output" -v p="$price_out" 'BEGIN{printf "%.0f", (t / 1000000) * p * 100}')
+            cost_cr=$(awk -v t="$cr" -v p="$price_cache" 'BEGIN{printf "%.0f", (t / 1000000) * p * 100}')
+            cost_cents=$((cost_in + cost_out + cost_cr))
+        fi
+
+        # Calculate duration from first to last timestamp
+        local duration_fmt="—"
+        if [[ -n "$first_ts" && -n "$last_ts" && "$first_ts" != "$last_ts" ]]; then
+            local ts_start ts_end dur_s
+            case "$(uname)" in
+                Darwin)
+                    ts_start=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${first_ts:0:19}" +%s 2>/dev/null || echo "0")
+                    ts_end=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${last_ts:0:19}" +%s 2>/dev/null || echo "0")
+                    ;;
+                *)
+                    ts_start=$(date -d "${first_ts:0:19}" +%s 2>/dev/null || echo "0")
+                    ts_end=$(date -d "${last_ts:0:19}" +%s 2>/dev/null || echo "0")
+                    ;;
+            esac
+            if [[ "$ts_start" -gt 0 && "$ts_end" -gt 0 ]]; then
+                dur_s=$((ts_end - ts_start))
+                if [[ "$dur_s" -ge 3600 ]]; then
+                    duration_fmt="$((dur_s / 3600))h$((dur_s % 3600 / 60))m"
+                elif [[ "$dur_s" -ge 60 ]]; then
+                    duration_fmt="$((dur_s / 60))m"
+                else
+                    duration_fmt="${dur_s}s"
+                fi
+            fi
+        fi
+
+        # Date display from first timestamp
+        local date_display="${first_ts:0:10}"
+
+        # Store: sort_key|short_id|msgs|input|output|cache|cost_cents|duration|date|model
+        local combined_input=$((input + cc))
+        session_data+=("${first_ts}|${short_id}|${msgs}|${combined_input}|${output}|${cr}|${cost_cents}|${duration_fmt}|${date_display}|${model}")
+
+        grand_input=$((grand_input + combined_input))
+        grand_output=$((grand_output + output))
+        grand_cache=$((grand_cache + cr))
+        grand_msgs=$((grand_msgs + msgs))
+        grand_cost_cents=$((grand_cost_cents + cost_cents))
+    done < <(find "$project_dir" -maxdepth 1 -name "*.jsonl" -print0 2>/dev/null)
+
+    complete_progress
+
+    if [[ ${#session_data[@]} -eq 0 ]]; then
+        log_info "No sessions found."
+        return 0
+    fi
+
+    # Sort by timestamp descending (most recent first)
+    local sorted
+    sorted=$(printf '%s\n' "${session_data[@]}" | sort -t'|' -k1 -r)
+
+    printf "  %-10s %-6s %8s %8s %8s %8s %8s  %s\n" "Session" "Date" "Messages" "Input" "Output" "Cache" "Cost" "Duration"
+    printf "  %-10s %-6s %8s %8s %8s %8s %8s  %s\n" "───────" "────" "────────" "─────" "──────" "─────" "────" "────────"
+
+    local shown=0
+    while IFS='|' read -r _ts sid smsg sinput soutput scache scost sdur sdate smodel; do
+        [[ -z "$sid" ]] && continue
+        shown=$((shown + 1))
+        [[ "$shown" -gt "$limit" ]] && break
+
+        local cost_fmt
+        cost_fmt=$(awk -v c="$scost" 'BEGIN{printf "$%.2f", c/100}')
+
+        printf "  %-10s %-10s %5d %8s %8s %8s %8s  %s\n" \
+            "${sid}..." "$sdate" "$smsg" \
+            "$(format_token_count "$sinput")" \
+            "$(format_token_count "$soutput")" \
+            "$(format_token_count "$scache")" \
+            "$cost_fmt" "$sdur"
+    done <<< "$sorted"
+
+    local remaining=$(( ${#session_data[@]} - shown ))
+    [[ "$remaining" -gt 0 ]] && echo "  ... and $remaining more (use --limit to show more)"
+
+    echo ""
+    echo "  ─────────────────────────────────────────────────────────────────────"
+
+    local grand_cost_fmt
+    grand_cost_fmt=$(awk -v c="$grand_cost_cents" 'BEGIN{printf "$%.2f", c/100}')
+
+    printf "  %-10s %-10s %5d %8s %8s %8s %8s\n" \
+        "Total" "" "$grand_msgs" \
+        "$(format_token_count "$grand_input")" \
+        "$(format_token_count "$grand_output")" \
+        "$(format_token_count "$grand_cache")" \
+        "$grand_cost_fmt"
+
+    echo ""
+    echo -e "  ${COLOR_BOLD}Sessions:${COLOR_RESET} ${#session_data[@]}  ${COLOR_BOLD}Cost:${COLOR_RESET} $grand_cost_fmt (estimated)"
+    echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Cost is estimated from model pricing — actual billing may differ"
+    echo ""
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -5138,269 +5264,1056 @@ clean_all() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Optimize Module — Token Usage Analysis
+# Profiles Module — Isolated CLAUDE_CONFIG_DIR Profiles
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Purpose: Analyzes token consumption footprint and provides optimization recommendations
-# Parameters: None
-# Returns: 0 on success
-# Usage: cmd_optimize
-cmd_optimize() {
-    echo -e "${COLOR_BOLD}CCM Optimize — Token Usage Analysis${COLOR_RESET}"
-    echo -e "${COLOR_BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}"
-    echo ""
-    echo -e "${COLOR_BOLD}Context Window Footprint:${COLOR_RESET}"
-    echo ""
+readonly PROFILES_DIR="$BACKUP_DIR/profiles"
 
-    local total_tokens=0
-    local recommendations=()
-    local potential_savings=0
+# Purpose: Creates and activates an isolated profile for concurrent sessions
+# Parameters: $1 — account identifier (number, email, or alias)
+# Returns: 0 on success, 1 on failure
+# Usage: switch_isolated work
+switch_isolated() {
+    local identifier="$1"
 
-    # 1. Global CLAUDE.md
-    local global_claude="$HOME/.claude/CLAUDE.md"
-    local global_chars=0
-    local global_lines=0
-    local global_tokens=0
-    if [[ -f "$global_claude" ]]; then
-        global_chars=$(wc -c < "$global_claude" | tr -d ' ')
-        global_lines=$(wc -l < "$global_claude" | tr -d ' ')
-        global_tokens=$((global_chars / 4))
-    fi
-    total_tokens=$((total_tokens + global_tokens))
-    local global_fmt
-    global_fmt=$(printf "%'d" "$global_chars" 2>/dev/null || echo "$global_chars")
-    local global_tok_fmt
-    global_tok_fmt=$(printf "%'d" "$global_tokens" 2>/dev/null || echo "$global_tokens")
-    if [[ "$global_chars" -gt 4000 ]]; then
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Consider trimming${COLOR_RESET}\n" "Global CLAUDE.md" "$global_fmt" "$global_tok_fmt"
-        recommendations+=("Trim global CLAUDE.md — at $global_fmt chars it adds ~$global_tok_fmt tokens to every request")
-        potential_savings=$((potential_savings + global_tokens / 3))
-    else
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Global CLAUDE.md" "$global_fmt" "$global_tok_fmt"
-    fi
-
-    # 2. Project CLAUDE.md
-    local project_claude=".claude/CLAUDE.md"
-    local proj_chars=0
-    local proj_tokens=0
-    if [[ -f "$project_claude" ]]; then
-        proj_chars=$(wc -c < "$project_claude" | tr -d ' ')
-        proj_tokens=$((proj_chars / 4))
-    fi
-    total_tokens=$((total_tokens + proj_tokens))
-    local proj_fmt
-    proj_fmt=$(printf "%'d" "$proj_chars" 2>/dev/null || echo "$proj_chars")
-    local proj_tok_fmt
-    proj_tok_fmt=$(printf "%'d" "$proj_tokens" 2>/dev/null || echo "$proj_tokens")
-    if [[ "$proj_chars" -gt 4000 ]]; then
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Consider trimming${COLOR_RESET}\n" "Project CLAUDE.md" "$proj_fmt" "$proj_tok_fmt"
-        recommendations+=("Trim project CLAUDE.md — at $proj_fmt chars it adds ~$proj_tok_fmt tokens per request")
-        potential_savings=$((potential_savings + proj_tokens / 3))
-    else
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Project CLAUDE.md" "$proj_fmt" "$proj_tok_fmt"
-    fi
-
-    # Combined warning
-    if [[ "$global_chars" -gt 4000 ]] && [[ "$proj_chars" -gt 4000 ]]; then
-        local combined=$((global_tokens + proj_tokens))
-        recommendations+=("Both CLAUDE.md files are large (combined ~$combined tokens) — consider splitting shared rules into project-specific files")
-    fi
-
-    # 3. MEMORY.md
-    local cwd_encoded
-    cwd_encoded=$(pwd | sed 's|/|-|g')
-    local memory_file="$HOME/.claude/projects/$cwd_encoded/memory/MEMORY.md"
-    local memory_lines=0
-    if [[ -f "$memory_file" ]]; then
-        memory_lines=$(wc -l < "$memory_file" | tr -d ' ')
-    fi
-    if [[ "$memory_lines" -gt 200 ]]; then
-        printf "  %-24s %6d lines                        ${COLOR_YELLOW}${SYM_WARN} Only first 200 loaded${COLOR_RESET}\n" "MEMORY.md" "$memory_lines"
-        recommendations+=("Trim MEMORY.md to 200 lines — only the first 200 are loaded, $((memory_lines - 200)) lines are wasted")
-    else
-        printf "  %-24s %6d lines                        ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "MEMORY.md" "$memory_lines"
-    fi
-
-    # 4. Enabled plugins
-    local settings_file="$HOME/.claude/settings.json"
-    local plugin_count=0
-    local plugin_tokens=0
-    if [[ -f "$settings_file" ]]; then
-        plugin_count=$(jq '[(.enabledPlugins // []) | length, (.projects // {} | [.[].plugins // []] | flatten | length)] | add' "$settings_file" 2>/dev/null || echo "0")
-        plugin_tokens=$((plugin_count * 500))
-    fi
-    total_tokens=$((total_tokens + plugin_tokens))
-    local plugin_tok_fmt
-    plugin_tok_fmt=$(printf "%'d" "$plugin_tokens" 2>/dev/null || echo "$plugin_tokens")
-    if [[ "$plugin_count" -gt 15 ]]; then
-        printf "  %-24s                (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} High — disable unused${COLOR_RESET}\n" "Plugins ($plugin_count enabled)" "$plugin_tok_fmt"
-        recommendations+=("Disable unused plugins — $plugin_count plugins add ~$plugin_tok_fmt tokens of tool schemas")
-        potential_savings=$((potential_savings + plugin_tokens / 3))
-    else
-        printf "  %-24s                (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Plugins ($plugin_count enabled)" "$plugin_tok_fmt"
-    fi
-
-    # 5. MCP servers
-    local mcp_config="$HOME/.claude/.mcp.json"
-    local mcp_count=0
-    local mcp_tokens=0
-    local mcp_replaceable=0
-    if [[ -f "$mcp_config" ]]; then
-        mcp_count=$(jq '[.mcpServers // {} | keys | length] | add' "$mcp_config" 2>/dev/null || echo "0")
-        mcp_tokens=$((mcp_count * 1500))
-
-        # Check for CLI-replaceable servers
-        declare -A _MCP_KNOWN=( ["playwright"]=1 ["postgres"]=1 ["filesystem"]=1 ["git"]=1 ["sqlite"]=1 ["docker"]=1 ["redis"]=1 ["mysql"]=1 )
-        local servers
-        servers=$(jq -r '.mcpServers // {} | keys[]' "$mcp_config" 2>/dev/null || true)
-        while IFS= read -r server; do
-            [[ -n "$server" ]] || continue
-            for key in "${!_MCP_KNOWN[@]}"; do
-                if [[ "$server" == *"$key"* ]]; then
-                    mcp_replaceable=$((mcp_replaceable + 1))
-                    break
-                fi
-            done
-        done <<< "$servers"
-    fi
-    total_tokens=$((total_tokens + mcp_tokens))
-    local mcp_tok_fmt
-    mcp_tok_fmt=$(printf "%'d" "$mcp_tokens" 2>/dev/null || echo "$mcp_tokens")
-    local mcp_label="MCP servers ($mcp_count)"
-    if [[ "$mcp_replaceable" -gt 0 ]]; then
-        printf "  %-24s                (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} $mcp_replaceable have CLI alternatives${COLOR_RESET}\n" "$mcp_label" "$mcp_tok_fmt"
-        recommendations+=("Replace $mcp_replaceable MCP server(s) with CLI — run 'ccm env audit' for details")
-        potential_savings=$((potential_savings + mcp_replaceable * 1500))
-    else
-        printf "  %-24s                (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "$mcp_label" "$mcp_tok_fmt"
-    fi
-
-    # 6. Hooks
-    local hook_chars=0
-    local hook_count=0
-    if [[ -f "$settings_file" ]]; then
-        hook_count=$(jq '[.hooks // {} | to_entries[] | .value | length] | add // 0' "$settings_file" 2>/dev/null || echo "0")
-        hook_chars=$(jq '[.hooks // {} | to_entries[] | .value[] | .prompt // "" | length] | add // 0' "$settings_file" 2>/dev/null || echo "0")
-    fi
-    local hook_tokens=$((hook_chars / 4))
-    total_tokens=$((total_tokens + hook_tokens))
-    local hook_fmt
-    hook_fmt=$(printf "%'d" "$hook_chars" 2>/dev/null || echo "$hook_chars")
-    local hook_tok_fmt
-    hook_tok_fmt=$(printf "%'d" "$hook_tokens" 2>/dev/null || echo "$hook_tokens")
-    if [[ "$hook_chars" -gt 2000 ]]; then
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_YELLOW}${SYM_WARN} Large hook prompts${COLOR_RESET}\n" "Hooks ($hook_count defined)" "$hook_fmt" "$hook_tok_fmt"
-        recommendations+=("Simplify hook prompts — $hook_fmt chars of hook prompt text adds ~$hook_tok_fmt tokens")
-        potential_savings=$((potential_savings + hook_tokens / 3))
-    else
-        printf "  %-24s %6s chars  (~%-6s tokens)  ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Hooks ($hook_count defined)" "$hook_fmt" "$hook_tok_fmt"
-    fi
-
-    # 7. Settings.json permissions
-    local perm_count=0
-    if [[ -f "$settings_file" ]]; then
-        perm_count=$(jq '[(.permissions // {}) | to_entries[] | .value | if type == "array" then length else 0 end] | add // 0' "$settings_file" 2>/dev/null || echo "0")
-    fi
-    if [[ "$perm_count" -gt 50 ]]; then
-        printf "  %-24s %6d entries                     ${COLOR_YELLOW}${SYM_WARN} Large allowlist${COLOR_RESET}\n" "Permissions" "$perm_count"
-        recommendations+=("Reduce permission entries — $perm_count entries inflate context")
-    else
-        printf "  %-24s %6d entries                     ${COLOR_GREEN}${SYM_OK} OK${COLOR_RESET}\n" "Permissions" "$perm_count"
-    fi
-
-    # Estimated total
-    echo ""
-    local total_fmt
-    total_fmt=$(printf "%'d" "$total_tokens" 2>/dev/null || echo "$total_tokens")
-    echo -e "  ${COLOR_BOLD}Estimated total overhead: ~$total_fmt tokens per request${COLOR_RESET}"
-
-    # Recommendations
-    if [[ ${#recommendations[@]} -gt 0 ]]; then
-        echo ""
-        echo -e "${COLOR_BOLD}Recommendations:${COLOR_RESET}"
-        local idx=1
-        for rec in "${recommendations[@]}"; do
-            echo "  $idx. $rec"
-            idx=$((idx + 1))
-        done
-        echo ""
-        local savings_fmt
-        savings_fmt=$(printf "%'d" "$potential_savings" 2>/dev/null || echo "$potential_savings")
-        echo -e "${COLOR_BOLD}Potential savings: ~$savings_fmt tokens/request${COLOR_RESET}"
-    else
-        echo ""
-        log_success "Token usage looks well-optimized."
-    fi
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Launch Module — Claude Code Wrapper with Mode Aliases
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Purpose: Launches Claude Code with preset permission modes and terminal reset on exit
-# Parameters: [mode] [extra args...] — mode: auto|yolo|plan|safe (default: normal launch)
-# Returns: Exit code from claude process
-# Usage: cmd_launch | cmd_launch auto | cmd_launch yolo | cmd_launch plan | cmd_launch safe
-cmd_launch() {
-    local mode="${1:-}"
-    local claude_bin
-    claude_bin=$(command -v claude 2>/dev/null)
-    if [[ -z "$claude_bin" ]]; then
-        log_error "Claude Code not found. Install it first: https://code.claude.com"
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_error "No accounts are managed yet"
         exit 1
     fi
 
-    local claude_args=()
+    local target_account
+    target_account=$(resolve_account_identifier "$identifier")
+    if [[ -z "$target_account" ]]; then
+        log_error "No account found matching: $identifier"
+        exit 1
+    fi
 
-    case "$mode" in
-        auto)
-            log_info "Launching Claude Code in ${COLOR_GREEN}auto mode${COLOR_RESET}"
-            claude_args+=("--permission-mode" "auto")
-            shift
-            ;;
-        yolo|dangerous)
-            log_warning "Launching Claude Code in ${COLOR_RED}dangerous mode${COLOR_RESET} (all permissions bypassed)"
-            echo -n "Are you sure? (y/N): "
-            read -r confirm
-            if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
-                log_info "Launch cancelled."
-                return 0
+    local target_email
+    target_email=$(jq -r --arg num "$target_account" '.accounts[$num].email' "$SEQUENCE_FILE")
+    local target_alias
+    target_alias=$(jq -r --arg num "$target_account" '.accounts[$num].alias // empty' "$SEQUENCE_FILE")
+    local profile_name="${target_alias:-account-$target_account}"
+
+    local profile_dir="$PROFILES_DIR/$profile_name"
+    mkdir -p "$profile_dir"
+
+    if [[ ! -f "$profile_dir/.claude.json" ]]; then
+        show_progress "Creating isolated profile: $profile_name"
+
+        # Copy credentials and config from account backup
+        local target_creds target_config
+        target_creds=$(read_account_credentials "$target_account" "$target_email")
+        target_config=$(read_account_config "$target_account" "$target_email")
+
+        if [[ -z "$target_creds" || -z "$target_config" ]]; then
+            log_error "Missing backup data for Account-$target_account. Run 'ccm verify $target_account' first."
+            exit 1
+        fi
+
+        # Write config to profile directory
+        echo "$target_config" > "$profile_dir/.claude.json"
+
+        # Write credentials to profile (file-based, platform-independent for isolation)
+        echo "$target_creds" > "$profile_dir/credentials.json"
+        chmod 600 "$profile_dir/credentials.json"
+
+        # Copy settings and MCP config from main ~/.claude/
+        [[ -f "$HOME/.claude/settings.json" ]] && cp "$HOME/.claude/settings.json" "$profile_dir/settings.json"
+        [[ -f "$HOME/.claude/.mcp.json" ]] && cp "$HOME/.claude/.mcp.json" "$profile_dir/.mcp.json"
+
+        complete_progress
+        log_success "Created profile: $profile_name"
+    fi
+
+    # Export the env var for this shell session
+    export CLAUDE_CONFIG_DIR="$profile_dir"
+
+    echo ""
+    echo -e "${COLOR_BOLD}Isolated profile activated: ${COLOR_GREEN}$profile_name${COLOR_RESET}"
+    echo -e "  Account: $target_email"
+    echo -e "  Config:  $profile_dir"
+    echo ""
+    echo "  CLAUDE_CONFIG_DIR=$profile_dir"
+    echo ""
+    echo "  Run 'claude' in this terminal to use this profile."
+    echo "  Other terminals use the default account."
+    echo ""
+    log_info "To add to your shell: export CLAUDE_CONFIG_DIR=\"$profile_dir\""
+}
+
+# Purpose: Routes profiles subcommands
+# Parameters: $1 — subcommand (list|sync|delete)
+# Returns: Exit code from dispatched subcommand
+# Usage: cmd_profiles list | cmd_profiles sync work | cmd_profiles delete work
+cmd_profiles() {
+    case "${1:-}" in
+        list)   profiles_list ;;
+        sync)   shift; profiles_sync "$@" ;;
+        delete) shift; profiles_delete "$@" ;;
+        "")     show_help profiles ;;
+        *)      log_error "Unknown profiles command '$1'"; show_help profiles; exit 1 ;;
+    esac
+}
+
+# Purpose: Lists all isolated profiles with their status
+# Parameters: None
+# Returns: None (prints table to stdout)
+# Usage: profiles_list
+profiles_list() {
+    echo -e "${COLOR_BOLD}Isolated Profiles${COLOR_RESET}"
+    echo ""
+
+    if [[ ! -d "$PROFILES_DIR" ]] || [[ -z "$(ls -A "$PROFILES_DIR" 2>/dev/null)" ]]; then
+        log_info "No profiles found. Create one with: ccm switch --isolated <account>"
+        return 0
+    fi
+
+    printf "  %-20s %-30s %s\n" "Profile" "Email" "Status"
+    printf "  %-20s %-30s %s\n" "-------" "-----" "------"
+
+    for profile_dir in "$PROFILES_DIR"/*/; do
+        [[ -d "$profile_dir" ]] || continue
+        local name
+        name=$(basename "$profile_dir")
+        local email="unknown"
+        if [[ -f "$profile_dir/.claude.json" ]]; then
+            email=$(jq -r '.oauthAccount.emailAddress // "unknown"' "$profile_dir/.claude.json" 2>/dev/null)
+        fi
+        local status="${COLOR_GREEN}ready${COLOR_RESET}"
+        if [[ "${CLAUDE_CONFIG_DIR:-}" == "$profile_dir" ]] || [[ "${CLAUDE_CONFIG_DIR:-}" == "${profile_dir%/}" ]]; then
+            status="${COLOR_CYAN}active${COLOR_RESET}"
+        fi
+        printf "  %-20s %-30s " "$name" "$email"
+        echo -e "$status"
+    done
+    echo ""
+}
+
+# Purpose: Syncs settings and MCP config from main ~/.claude/ to a named profile
+# Parameters: $1 — profile name
+# Returns: 0 on success, 1 if profile not found
+# Usage: profiles_sync work
+profiles_sync() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        log_error "Usage: ccm profiles sync <name>"
+        return 1
+    fi
+
+    local profile_dir="$PROFILES_DIR/$name"
+    if [[ ! -d "$profile_dir" ]]; then
+        log_error "Profile not found: $name"
+        return 1
+    fi
+
+    show_progress "Syncing settings to profile: $name"
+    [[ -f "$HOME/.claude/settings.json" ]] && cp "$HOME/.claude/settings.json" "$profile_dir/settings.json"
+    [[ -f "$HOME/.claude/.mcp.json" ]] && cp "$HOME/.claude/.mcp.json" "$profile_dir/.mcp.json"
+    complete_progress
+    log_success "Profile '$name' synced with current settings"
+}
+
+# Purpose: Deletes an isolated profile directory
+# Parameters: $1 — profile name
+# Returns: 0 on success, 1 if profile not found
+# Usage: profiles_delete work
+profiles_delete() {
+    local name="${1:-}"
+    if [[ -z "$name" ]]; then
+        log_error "Usage: ccm profiles delete <name>"
+        return 1
+    fi
+
+    local profile_dir="$PROFILES_DIR/$name"
+    if [[ ! -d "$profile_dir" ]]; then
+        log_error "Profile not found: $name"
+        return 1
+    fi
+
+    if [[ "${CLAUDE_CONFIG_DIR:-}" == "$profile_dir" ]] || [[ "${CLAUDE_CONFIG_DIR:-}" == "${profile_dir%/}" ]]; then
+        log_warning "This profile is currently active in this terminal."
+        echo -n "Delete anyway? (y/N): "
+        read -r confirm
+        [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return 0
+    fi
+
+    rm -rf "$profile_dir"
+    log_success "Deleted profile: $name"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Watch Module — Rate Limit Monitoring
+# ──────────────────────────────────────────────────────────────────────────────
+
+readonly WATCH_PID_FILE="$BACKUP_DIR/watch.pid"
+readonly RATE_LIMITS_FILE="$BACKUP_DIR/rate-limits.json"
+
+# Purpose: Routes watch subcommands
+# Parameters: $@ — subcommand and options
+# Returns: Exit code from dispatched subcommand
+# Usage: cmd_watch --threshold 85 | cmd_watch stop | cmd_watch status
+cmd_watch() {
+    case "${1:-}" in
+        stop)   watch_stop ;;
+        status) watch_status ;;
+        "")     show_help watch ;;
+        *)      watch_start "$@" ;;
+    esac
+}
+
+# Purpose: Starts the rate limit watcher as a background process
+# Parameters: [--threshold N] [--auto] [--interval N]
+# Returns: 0 on success
+# Usage: watch_start --threshold 85 --auto
+watch_start() {
+    local threshold=85
+    local auto_switch=0
+    local interval=60
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --threshold) threshold="$2"; shift 2 ;;
+            --auto)      auto_switch=1; shift ;;
+            --interval)  interval="$2"; shift 2 ;;
+            *)           log_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    if ! [[ "$threshold" =~ ^[0-9]+$ ]] || [[ "$threshold" -lt 1 ]] || [[ "$threshold" -gt 100 ]]; then
+        log_error "--threshold must be 1-100"
+        return 1
+    fi
+
+    if ! [[ "$interval" =~ ^[0-9]+$ ]] || [[ "$interval" -lt 10 ]]; then
+        log_error "--interval must be >= 10 seconds"
+        return 1
+    fi
+
+    # Kill existing watcher if running
+    watch_stop 2>/dev/null
+
+    local mode_label="notify"
+    [[ "$auto_switch" -eq 1 ]] && mode_label="auto-switch"
+
+    echo -e "${COLOR_BOLD}CCM Rate Limit Watcher${COLOR_RESET}"
+    echo ""
+    echo "  Threshold:  ${threshold}%"
+    echo "  Mode:       $mode_label"
+    echo "  Interval:   ${interval}s"
+    echo ""
+
+    if [[ ! -f "$RATE_LIMITS_FILE" ]]; then
+        log_warning "No rate limit data found. Install the CCM statusline first:"
+        echo "  ccm statusline install"
+        echo ""
+        log_info "The statusline writes rate limit data that the watcher monitors."
+        return 1
+    fi
+
+    # Start background watcher
+    (
+        while true; do
+            if [[ ! -f "$RATE_LIMITS_FILE" ]]; then
+                sleep "$interval"
+                continue
             fi
-            claude_args+=("--dangerously-skip-permissions")
-            shift
-            ;;
-        plan)
-            log_info "Launching Claude Code in ${COLOR_CYAN}plan mode${COLOR_RESET} (read-only)"
-            claude_args+=("--permission-mode" "plan")
-            shift
-            ;;
-        safe)
-            log_info "Launching Claude Code in ${COLOR_GREEN}safe mode${COLOR_RESET} (ask for everything)"
-            claude_args+=("--permission-mode" "default")
-            shift
-            ;;
-        "")
-            # Normal launch, no special mode
-            ;;
-        *)
-            # Not a mode — pass everything through as claude args
-            ;;
+
+            local five_hour_pct
+            five_hour_pct=$(jq -r '.five_hour.used_percentage // 0' "$RATE_LIMITS_FILE" 2>/dev/null || echo "0")
+            local pct_int
+            pct_int=$(echo "$five_hour_pct" | cut -d. -f1)
+
+            if [[ "$pct_int" -ge "$threshold" ]]; then
+                if [[ "$auto_switch" -eq 1 ]]; then
+                    # Find account with lowest usage (round-robin fallback)
+                    local script_dir
+                    script_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")")
+                    bash "${script_dir}/ccm.sh" switch 2>/dev/null || true
+                    echo -e "\a${COLOR_YELLOW}[CCM Watch] Rate limit at ${pct_int}% — auto-switched account${COLOR_RESET}" >&2
+                else
+                    echo -e "\a${COLOR_YELLOW}[CCM Watch] Rate limit at ${pct_int}% (threshold: ${threshold}%) — run 'ccm switch' to rotate${COLOR_RESET}" >&2
+                fi
+            fi
+
+            sleep "$interval"
+        done
+    ) &
+    local watcher_pid=$!
+    echo "$watcher_pid" > "$WATCH_PID_FILE"
+    disown "$watcher_pid" 2>/dev/null
+
+    log_success "Watcher started (PID: $watcher_pid)"
+    echo "  Stop with: ccm watch stop"
+}
+
+# Purpose: Stops the background rate limit watcher
+# Parameters: None
+# Returns: 0
+# Usage: watch_stop
+watch_stop() {
+    if [[ -f "$WATCH_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$WATCH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            log_success "Watcher stopped (PID: $pid)"
+        else
+            log_info "Watcher was not running"
+        fi
+        rm -f "$WATCH_PID_FILE"
+    else
+        log_info "No watcher is running"
+    fi
+}
+
+# Purpose: Shows the current watcher state and latest rate limit data
+# Parameters: None
+# Returns: 0
+# Usage: watch_status
+watch_status() {
+    echo -e "${COLOR_BOLD}CCM Watcher Status${COLOR_RESET}"
+    echo ""
+
+    # Watcher process
+    if [[ -f "$WATCH_PID_FILE" ]]; then
+        local pid
+        pid=$(cat "$WATCH_PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo -e "  Watcher:  ${COLOR_GREEN}running${COLOR_RESET} (PID: $pid)"
+        else
+            echo -e "  Watcher:  ${COLOR_RED}stopped${COLOR_RESET} (stale PID file)"
+            rm -f "$WATCH_PID_FILE"
+        fi
+    else
+        echo -e "  Watcher:  ${COLOR_YELLOW}not running${COLOR_RESET}"
+    fi
+
+    # Latest rate limit data
+    if [[ -f "$RATE_LIMITS_FILE" ]]; then
+        local five_pct seven_pct five_reset seven_reset
+        five_pct=$(jq -r '.five_hour.used_percentage // "n/a"' "$RATE_LIMITS_FILE" 2>/dev/null)
+        seven_pct=$(jq -r '.seven_day.used_percentage // "n/a"' "$RATE_LIMITS_FILE" 2>/dev/null)
+        five_reset=$(jq -r '.five_hour.resets_at // empty' "$RATE_LIMITS_FILE" 2>/dev/null)
+        seven_reset=$(jq -r '.seven_day.resets_at // empty' "$RATE_LIMITS_FILE" 2>/dev/null)
+
+        echo ""
+        echo -e "  ${COLOR_BOLD}Rate Limits:${COLOR_RESET}"
+        local five_fmt="$five_pct%"
+        if [[ -n "$five_reset" && "$five_reset" != "null" ]]; then
+            local reset_time
+            case "$(uname)" in
+                Darwin) reset_time=$(date -r "$five_reset" +%H:%M 2>/dev/null) ;;
+                *)      reset_time=$(date -d "@$five_reset" +%H:%M 2>/dev/null) ;;
+            esac
+            [[ -n "$reset_time" ]] && five_fmt+=" (resets $reset_time)"
+        fi
+        echo "    5-hour:  $five_fmt"
+
+        local seven_fmt="$seven_pct%"
+        if [[ -n "$seven_reset" && "$seven_reset" != "null" ]]; then
+            local reset_time
+            case "$(uname)" in
+                Darwin) reset_time=$(date -r "$seven_reset" +%H:%M 2>/dev/null) ;;
+                *)      reset_time=$(date -d "@$seven_reset" +%H:%M 2>/dev/null) ;;
+            esac
+            [[ -n "$reset_time" ]] && seven_fmt+=" (resets $reset_time)"
+        fi
+        echo "    7-day:   $seven_fmt"
+
+        local updated
+        updated=$(jq -r '.updated_at // empty' "$RATE_LIMITS_FILE" 2>/dev/null)
+        [[ -n "$updated" ]] && echo "    Updated: $updated"
+    else
+        echo ""
+        echo -e "  Rate data: ${COLOR_YELLOW}unavailable${COLOR_RESET} (install statusline first)"
+    fi
+    echo ""
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Usage Dashboard Module — Per-Account Token Analytics
+# ──────────────────────────────────────────────────────────────────────────────
+
+readonly USAGE_HISTORY_FILE="$BACKUP_DIR/usage-history.json"
+
+# Purpose: Shows per-account usage dashboard with token attribution
+# Parameters: [--days N] [--account <name>]
+# Returns: 0
+# Usage: usage_dashboard | usage_dashboard --days 30 | usage_dashboard --account work
+usage_dashboard() {
+    local days=7
+    local filter_account=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --days)    days="$2"; shift 2 ;;
+            --account) filter_account="$2"; shift 2 ;;
+            *)         log_error "Unknown option '$1'"; return 1 ;;
+        esac
+    done
+
+    if ! [[ "$days" =~ ^[0-9]+$ ]] || [[ "$days" -eq 0 ]]; then
+        log_error "--days must be a positive integer."
+        return 1
+    fi
+
+    if [[ ! -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        log_error "Claude Code projects directory not found: $CLAUDE_PROJECTS_DIR"
+        return 1
+    fi
+
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_error "No accounts managed. Run 'ccm add' first."
+        return 1
+    fi
+
+    echo -e "${COLOR_BOLD}Account Usage Dashboard (last $days days)${COLOR_RESET}"
+    echo -e "${COLOR_BOLD}═══════════════════════════════════════════${COLOR_RESET}"
+    echo ""
+
+    show_progress "Analyzing token usage across accounts"
+
+    # Build switch history timeline from sequence.json
+    local platform
+    platform=$(detect_platform)
+    local cutoff_date
+    case "$platform" in
+        macos) cutoff_date=$(date -v-"${days}"d +%Y-%m-%d) ;;
+        *)     cutoff_date=$(date -d "-${days} days" +%Y-%m-%d) ;;
     esac
 
-    # Append any remaining arguments
-    claude_args+=("$@")
+    # Get all account emails for attribution
+    declare -A account_input account_output account_cache account_sessions account_duration
+    local account_emails=()
 
-    # Run claude and ensure terminal reset on exit
-    local exit_code=0
-    "$claude_bin" "${claude_args[@]}" || exit_code=$?
+    while IFS=$'\t' read -r num email alias_name; do
+        [[ -z "$email" || "$email" == "null" ]] && continue
+        local label="${alias_name:-$email}"
+        if [[ -n "$filter_account" ]]; then
+            [[ "$num" != "$filter_account" && "$email" != "$filter_account" && "$label" != "$filter_account" ]] && continue
+        fi
+        account_emails+=("$email")
+        account_input[$email]=0
+        account_output[$email]=0
+        account_cache[$email]=0
+        account_sessions[$email]=0
+        account_duration[$email]=0
+    done < <(jq -r '.accounts | to_entries[] | [.key, .value.email, (.value.alias // "")] | @tsv' "$SEQUENCE_FILE" 2>/dev/null)
 
-    # Reset terminal state (fixes broken Ctrl-C/Ctrl-D after exit in tmux/kitty/ghostty)
-    printf '\033[?1003l\033[?1006l' 2>/dev/null  # disable mouse tracking modes
-    printf '\033[?1036l' 2>/dev/null              # disable metaSendsEscape
-    stty sane 2>/dev/null                          # restore sane terminal settings
+    if [[ ${#account_emails[@]} -eq 0 ]]; then
+        complete_progress
+        log_info "No accounts found matching filter."
+        return 0
+    fi
 
-    return $exit_code
+    # Build switch timeline for attribution
+    # Each history entry has {from, to, timestamp}
+    # We create intervals: [timestamp_i, timestamp_i+1) → account_i
+    local switch_times=()
+    local switch_accounts=()
+
+    while IFS=$'\t' read -r ts account_num; do
+        [[ -z "$ts" ]] && continue
+        local account_email
+        account_email=$(jq -r --arg n "$account_num" '.accounts[$n].email // ""' "$SEQUENCE_FILE" 2>/dev/null)
+        [[ -z "$account_email" ]] && continue
+        switch_times+=("$ts")
+        switch_accounts+=("$account_email")
+    done < <(jq -r '.history[]? | [.timestamp, (.to | tostring)] | @tsv' "$SEQUENCE_FILE" 2>/dev/null)
+
+    # Current active account fills the latest window
+    local current_email
+    current_email=$(get_current_account)
+
+    # Attribute sessions: for each JSONL file, find which account was active at session time
+    local grand_input=0 grand_output=0 grand_cache=0
+
+    for project_dir in "$CLAUDE_PROJECTS_DIR"/*/; do
+        [[ -d "$project_dir" ]] || continue
+
+        while IFS= read -r -d '' jsonl_file; do
+            # Get first timestamp from file to determine which account was active
+            local first_ts
+            first_ts=$(head -1 "$jsonl_file" 2>/dev/null | jq -r '.timestamp // empty' 2>/dev/null)
+            [[ -z "$first_ts" ]] && continue
+            [[ "${first_ts:0:10}" < "$cutoff_date" ]] && continue
+
+            # Determine active account at session start by checking switch history
+            local session_account="$current_email"
+            for i in "${!switch_times[@]}"; do
+                if [[ "${switch_times[$i]}" > "$first_ts" ]]; then
+                    break
+                fi
+                session_account="${switch_accounts[$i]}"
+            done
+
+            # Skip if this account is filtered out
+            if [[ -n "$filter_account" ]] && [[ " ${account_emails[*]} " != *" $session_account "* ]]; then
+                continue
+            fi
+
+            # Parse token usage from this session
+            local result
+            result=$(jq -r --arg cutoff "$cutoff_date" '
+                select(.type == "assistant" and .message.usage != null)
+                | select(.timestamp != null and (.timestamp[:10]) >= $cutoff)
+                | "\(.message.usage.input_tokens // 0)|\(.message.usage.output_tokens // 0)|\(.message.usage.cache_creation_input_tokens // 0)|\(.message.usage.cache_read_input_tokens // 0)"
+            ' "$jsonl_file" 2>/dev/null) || continue
+
+            local sess_in=0 sess_out=0 sess_cache=0
+            while IFS='|' read -r input output cache_create cache_read; do
+                [[ -z "$input" ]] && continue
+                sess_in=$((sess_in + input + cache_create + cache_read))
+                sess_out=$((sess_out + output))
+                sess_cache=$((sess_cache + cache_create + cache_read))
+            done <<< "$result"
+
+            if [[ "$sess_in" -gt 0 || "$sess_out" -gt 0 ]]; then
+                # Ensure account exists in our tracking arrays
+                if [[ -n "${account_input[$session_account]+x}" ]]; then
+                    account_input[$session_account]=$(( ${account_input[$session_account]} + sess_in ))
+                    account_output[$session_account]=$(( ${account_output[$session_account]} + sess_out ))
+                    account_cache[$session_account]=$(( ${account_cache[$session_account]} + sess_cache ))
+                    account_sessions[$session_account]=$(( ${account_sessions[$session_account]} + 1 ))
+                fi
+                grand_input=$((grand_input + sess_in))
+                grand_output=$((grand_output + sess_out))
+                grand_cache=$((grand_cache + sess_cache))
+            fi
+        done < <(find "$project_dir" -maxdepth 2 -name "*.jsonl" -print0 2>/dev/null)
+    done
+
+    complete_progress
+
+    if [[ "$grand_input" -eq 0 && "$grand_output" -eq 0 ]]; then
+        log_info "No token usage data found for the last $days days."
+        return 0
+    fi
+
+    # Display dashboard
+    printf "  %-25s %12s %12s %12s %8s\n" "Account" "Input" "Output" "Cache" "Sessions"
+    printf "  %-25s %12s %12s %12s %8s\n" "───────" "─────" "──────" "─────" "────────"
+
+    for email in "${account_emails[@]}"; do
+        local in_val=${account_input[$email]:-0}
+        local out_val=${account_output[$email]:-0}
+        local cache_val=${account_cache[$email]:-0}
+        local sess_val=${account_sessions[$email]:-0}
+
+        [[ "$in_val" -eq 0 && "$out_val" -eq 0 ]] && continue
+
+        # Get display label (alias or truncated email)
+        local label
+        label=$(jq -r --arg e "$email" '.accounts | to_entries[] | select(.value.email == $e) | .value.alias // $e' "$SEQUENCE_FILE" 2>/dev/null)
+        [[ ${#label} -gt 25 ]] && label="...${label: -22}"
+
+        # Format numbers
+        local in_fmt out_fmt cache_fmt
+        in_fmt=$(format_token_count "$in_val")
+        out_fmt=$(format_token_count "$out_val")
+        cache_fmt=$(format_token_count "$cache_val")
+
+        printf "  %-25s %12s %12s %12s %8d\n" "$label" "$in_fmt" "$out_fmt" "$cache_fmt" "$sess_val"
+    done
+
+    echo ""
+    printf "  %-25s %12s %12s %12s\n" "───────" "─────" "──────" "─────"
+    printf "  %-25s %12s %12s %12s\n" "Total" \
+        "$(format_token_count "$grand_input")" \
+        "$(format_token_count "$grand_output")" \
+        "$(format_token_count "$grand_cache")"
+    echo ""
 }
+
+# Purpose: Formats token count as human-readable string (K/M)
+# Parameters: $1 — token count
+# Returns: Formatted string on stdout
+# Usage: format_token_count 1500000  # → "1.5M"
+format_token_count() {
+    local count="$1"
+    if [[ "$count" -ge 1000000 ]]; then
+        awk -v c="$count" 'BEGIN{printf "%.1fM", c/1000000}'
+    elif [[ "$count" -ge 1000 ]]; then
+        awk -v c="$count" 'BEGIN{printf "%.0fK", c/1000}'
+    else
+        echo "$count"
+    fi
+}
+
+# Purpose: Side-by-side account usage comparison
+# Parameters: [--days N]
+# Returns: 0
+# Usage: usage_compare | usage_compare --days 30
+usage_compare() {
+    usage_dashboard "$@"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Session Archive Module — Compress & Restore Sessions
+# ──────────────────────────────────────────────────────────────────────────────
+
+readonly ARCHIVES_DIR="$BACKUP_DIR/archives"
+
+# Purpose: Archives old sessions as compressed tar.gz files
+# Parameters: [--older-than Nd] [--project <path>] [--dry-run]
+# Returns: 0 on success
+# Usage: session_archive | session_archive --older-than 30d
+session_archive() {
+    local older_than=30
+    local filter_project=""
+    local dry_run=0
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --older-than)
+                local val="${2:-30d}"
+                older_than="${val%d}"
+                if ! [[ "$older_than" =~ ^[0-9]+$ ]]; then
+                    log_error "--older-than must be a number (with optional 'd' suffix)"
+                    return 1
+                fi
+                shift 2
+                ;;
+            --project) filter_project="$2"; shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            *)         log_error "Unknown option: $1"; return 1 ;;
+        esac
+    done
+
+    if [[ ! -d "$CLAUDE_PROJECTS_DIR" ]]; then
+        log_error "Claude Code projects directory not found: $CLAUDE_PROJECTS_DIR"
+        return 1
+    fi
+
+    mkdir -p "$ARCHIVES_DIR"
+
+    local platform
+    platform=$(detect_platform)
+    local now
+    now=$(date +%s)
+    local cutoff_seconds=$((older_than * 86400))
+
+    echo -e "${COLOR_BOLD}Session Archive${COLOR_RESET}"
+    echo ""
+
+    local total_archived=0
+    local total_size=0
+
+    for project_dir in "$CLAUDE_PROJECTS_DIR"/*/; do
+        [[ -d "$project_dir" ]] || continue
+
+        local dirname
+        dirname=$(basename "$project_dir")
+        local decoded_path
+        decoded_path=$(decode_project_path "$dirname")
+
+        if [[ -n "$filter_project" ]]; then
+            local abs_filter
+            abs_filter=$(cd "$filter_project" 2>/dev/null && pwd || echo "$filter_project")
+            [[ "$decoded_path" != "$abs_filter" ]] && continue
+        fi
+
+        # Find JSONL files older than threshold
+        local old_files=()
+        while IFS= read -r -d '' jsonl_file; do
+            local mtime
+            mtime=$(get_mtime "$jsonl_file")
+            local age=$((now - mtime))
+            if [[ "$age" -ge "$cutoff_seconds" ]]; then
+                old_files+=("$jsonl_file")
+            fi
+        done < <(find "$project_dir" -maxdepth 1 -name "*.jsonl" -print0 2>/dev/null)
+
+        [[ ${#old_files[@]} -eq 0 ]] && continue
+
+        local display_path
+        display_path=$(truncate_path "$decoded_path")
+        local file_count=${#old_files[@]}
+
+        # Calculate size
+        local dir_size=0
+        for f in "${old_files[@]}"; do
+            local fsize
+            fsize=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+            dir_size=$((dir_size + fsize))
+        done
+
+        if [[ "$dry_run" -eq 1 ]]; then
+            echo "  [dry-run] Would archive $file_count sessions from $display_path ($(format_size $dir_size))"
+        else
+            # Create archive
+            local archive_name="${dirname}-$(date +%Y%m%d).tar.gz"
+            local archive_path="$ARCHIVES_DIR/$archive_name"
+
+            # Use file list to avoid archiving non-old files
+            local file_list
+            file_list=$(mktemp)
+            printf '%s\n' "${old_files[@]}" > "$file_list"
+            tar czf "$archive_path" -T "$file_list" 2>/dev/null
+            rm -f "$file_list"
+
+            # Update index
+            local index_file="$ARCHIVES_DIR/index.json"
+            local entry
+            entry=$(jq -n \
+                --arg name "$archive_name" \
+                --arg project "$decoded_path" \
+                --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --argjson sessions "$file_count" \
+                --argjson original_bytes "$dir_size" \
+                '{name: $name, project: $project, archived_at: $date, sessions: $sessions, original_bytes: $original_bytes}')
+
+            if [[ -f "$index_file" ]]; then
+                local updated
+                updated=$(jq --argjson entry "$entry" '. += [$entry]' "$index_file")
+                echo "$updated" > "$index_file"
+            else
+                echo "[$entry]" > "$index_file"
+            fi
+
+            # Remove archived files
+            for f in "${old_files[@]}"; do
+                rm -f "$f"
+            done
+
+            echo "  Archived $file_count sessions from $display_path ($(format_size $dir_size))"
+        fi
+
+        total_archived=$((total_archived + file_count))
+        total_size=$((total_size + dir_size))
+    done
+
+    echo ""
+    if [[ "$total_archived" -eq 0 ]]; then
+        log_info "No sessions older than ${older_than} days found."
+    elif [[ "$dry_run" -eq 1 ]]; then
+        log_info "Would archive $total_archived sessions ($(format_size $total_size)). Run without --dry-run to proceed."
+    else
+        log_success "Archived $total_archived sessions, freed $(format_size $total_size)"
+    fi
+}
+
+# Purpose: Restores sessions from an archive
+# Parameters: $1 — archive name
+# Returns: 0 on success, 1 on failure
+# Usage: session_restore my-project-20260401.tar.gz
+session_restore() {
+    local archive_name="${1:-}"
+    if [[ -z "$archive_name" ]]; then
+        log_error "Usage: ccm session restore <archive-name>"
+        return 1
+    fi
+
+    local archive_path="$ARCHIVES_DIR/$archive_name"
+    if [[ ! -f "$archive_path" ]]; then
+        log_error "Archive not found: $archive_name"
+        echo "  Run 'ccm session archives' to list available archives."
+        return 1
+    fi
+
+    show_progress "Restoring sessions from $archive_name"
+    tar xzf "$archive_path" 2>/dev/null
+    complete_progress
+    log_success "Restored sessions from $archive_name"
+}
+
+# Purpose: Lists all session archives with sizes
+# Parameters: None
+# Returns: None (prints table to stdout)
+# Usage: session_archives_list
+session_archives_list() {
+    echo -e "${COLOR_BOLD}Session Archives${COLOR_RESET}"
+    echo ""
+
+    local index_file="$ARCHIVES_DIR/index.json"
+    if [[ ! -f "$index_file" ]] || [[ ! -d "$ARCHIVES_DIR" ]]; then
+        log_info "No archives found. Create one with: ccm session archive"
+        return 0
+    fi
+
+    printf "  %-40s %8s %10s  %s\n" "Archive" "Sessions" "Saved" "Date"
+    printf "  %-40s %8s %10s  %s\n" "───────" "────────" "─────" "────"
+
+    jq -r '.[] | [.name, (.sessions | tostring), (.original_bytes | tostring), .archived_at] | @tsv' "$index_file" 2>/dev/null | \
+    while IFS=$'\t' read -r name sessions orig_bytes date; do
+        local archive_path="$ARCHIVES_DIR/$name"
+        local archive_size="deleted"
+        if [[ -f "$archive_path" ]]; then
+            local actual_bytes
+            actual_bytes=$(wc -c < "$archive_path" | tr -d ' ')
+            archive_size=$(format_size "$actual_bytes")
+        fi
+        local display_date="${date:0:10}"
+        printf "  %-40s %8s %10s  %s\n" "$name" "$sessions" "$(format_size "$orig_bytes")" "$display_date"
+    done
+
+    echo ""
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Setup Module — First-Run Wizard
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Interactive first-run setup wizard
+# Parameters: None
+# Returns: 0
+# Usage: cmd_setup
+cmd_setup() {
+    echo -e "${COLOR_GREEN}"
+    echo ' ██████╗ ██████╗███╗   ███╗'
+    echo '██╔════╝██╔════╝████╗ ████║'
+    echo '██║     ██║     ██╔████╔██║'
+    echo '██║     ██║     ██║╚██╔╝██║'
+    echo '╚██████╗╚██████╗██║ ╚═╝ ██║'
+    echo -e ' ╚═════╝ ╚═════╝╚═╝     ╚═╝'"${COLOR_RESET}"
+    echo ""
+    echo -e "${COLOR_BOLD}CCM Setup Wizard${COLOR_RESET}  ${COLOR_GREEN}v${CCM_VERSION}${COLOR_RESET}"
+    echo ""
+
+    # Step 1: Dependencies
+    echo -e "${COLOR_BOLD}Step 1: Checking dependencies${COLOR_RESET}"
+    local deps_ok=1
+
+    if command -v jq &>/dev/null; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} jq $(jq --version 2>/dev/null)"
+    else
+        echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} jq — install with: brew install jq"
+        deps_ok=0
+    fi
+
+    if command -v curl &>/dev/null; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} curl"
+    else
+        echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} curl — install with: brew install curl"
+        deps_ok=0
+    fi
+
+    local bash_ver="${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}"
+    if [[ "${BASH_VERSINFO[0]}" -ge 4 ]] && [[ "${BASH_VERSINFO[1]}" -ge 4 || "${BASH_VERSINFO[0]}" -ge 5 ]]; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} bash $bash_ver"
+    else
+        echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} bash $bash_ver — need 4.4+: brew install bash"
+        deps_ok=0
+    fi
+
+    if [[ "$deps_ok" -eq 0 ]]; then
+        echo ""
+        log_error "Install missing dependencies and re-run 'ccm setup'."
+        return 1
+    fi
+    echo ""
+
+    # Step 2: Detect Claude Code
+    echo -e "${COLOR_BOLD}Step 2: Detecting Claude Code${COLOR_RESET}"
+    local claude_bin
+    claude_bin=$(command -v claude 2>/dev/null)
+    if [[ -n "$claude_bin" ]]; then
+        local claude_ver
+        claude_ver=$(claude --version 2>/dev/null | head -1 || echo "unknown")
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Claude Code: $claude_ver"
+    else
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Claude Code not found in PATH"
+        echo "  Install: https://code.claude.com"
+    fi
+    echo ""
+
+    # Step 3: Import current account
+    echo -e "${COLOR_BOLD}Step 3: Account setup${COLOR_RESET}"
+    local current_email
+    current_email=$(get_current_account 2>/dev/null || echo "none")
+
+    if [[ "$current_email" != "none" ]]; then
+        echo "  Found logged-in account: $current_email"
+
+        if [[ -f "$SEQUENCE_FILE" ]] && account_exists "$current_email"; then
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Already managed by CCM"
+        else
+            echo -n "  Import this account? (Y/n): "
+            read -r import_choice
+            if [[ "$import_choice" != "n" && "$import_choice" != "N" ]]; then
+                cmd_add_account
+            fi
+        fi
+    else
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} No account logged in. Log in with 'claude' first."
+    fi
+    echo ""
+
+    # Step 4: Statusline
+    echo -e "${COLOR_BOLD}Step 4: Statusline${COLOR_RESET}"
+    local statusline_path="$HOME/.claude/ccm-statusline.sh"
+    if [[ -f "$statusline_path" ]]; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Already installed"
+    else
+        echo -n "  Install CCM statusline? (Y/n): "
+        read -r sl_choice
+        if [[ "$sl_choice" != "n" && "$sl_choice" != "N" ]]; then
+            cmd_statusline install
+        fi
+    fi
+    echo ""
+
+    # Step 5: Shell hook
+    echo -e "${COLOR_BOLD}Step 5: Shell hook (auto-switch on cd)${COLOR_RESET}"
+    local shell_rc=""
+    if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$SHELL" == *zsh* ]]; then
+        shell_rc="$HOME/.zshrc"
+    else
+        shell_rc="$HOME/.bashrc"
+    fi
+
+    if [[ -f "$shell_rc" ]] && grep -qF 'ccm hook' "$shell_rc" 2>/dev/null; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Already in $shell_rc"
+    else
+        echo "  This adds auto-switching when you cd into a bound project."
+        echo -n "  Add to $shell_rc? (Y/n): "
+        read -r hook_choice
+        if [[ "$hook_choice" != "n" && "$hook_choice" != "N" ]]; then
+            echo "" >> "$shell_rc"
+            echo '# CCM — auto-switch Claude Code account on cd' >> "$shell_rc"
+            echo 'eval "$(ccm hook)"' >> "$shell_rc"
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Added to $shell_rc"
+        fi
+    fi
+    echo ""
+
+    # Step 6: Project init
+    echo -e "${COLOR_BOLD}Step 6: Project setup${COLOR_RESET}"
+    if [[ -f ".claudeignore" ]]; then
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} .claudeignore exists"
+    else
+        echo -n "  Generate .claudeignore for current project? (Y/n): "
+        read -r init_choice
+        if [[ "$init_choice" != "n" && "$init_choice" != "N" ]]; then
+            cmd_init
+        fi
+    fi
+    echo ""
+
+    # Quick start
+    echo -e "${COLOR_BOLD}Quick Start Cheatsheet${COLOR_RESET}"
+    echo "  ────────────────────────────────"
+    echo "  ccm add                  Add another account"
+    echo "  ccm alias 1 work         Name your accounts"
+    echo "  ccm switch work          Switch accounts"
+    echo "  ccm bind . work          Bind project to account"
+    echo "  ccm usage dashboard      View per-account usage"
+    echo ""
+    log_success "Setup complete!"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Recover Module — Error Recovery
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Purpose: Detects and fixes inconsistent credential state from interrupted operations
+# Parameters: None
+# Returns: 0 on success
+# Usage: cmd_recover
+cmd_recover() {
+    echo -e "${COLOR_BOLD}CCM Recovery — Checking credential consistency${COLOR_RESET}"
+    echo ""
+
+    local issues=0
+
+    if [[ ! -f "$SEQUENCE_FILE" ]]; then
+        log_info "No sequence.json found — nothing to recover."
+        return 0
+    fi
+
+    # Check 1: sequence.json vs credential files
+    echo -e "${COLOR_BOLD}Check 1: Credential files${COLOR_RESET}"
+    local account_count
+    account_count=$(jq '.accounts | length' "$SEQUENCE_FILE")
+
+    while IFS=$'\t' read -r num email; do
+        [[ -z "$num" || -z "$email" ]] && continue
+
+        local creds_path="$BACKUP_DIR/credentials/account-${num}-${email}"
+        local config_path="$BACKUP_DIR/configs/account-${num}-${email}.json"
+
+        if [[ ! -f "$creds_path" ]] && [[ ! -d "$creds_path" ]]; then
+            echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} Missing credentials for Account-$num ($email)"
+            issues=$((issues + 1))
+        else
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Account-$num ($email) credentials present"
+        fi
+
+        if [[ ! -f "$config_path" ]]; then
+            echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} Missing config for Account-$num ($email)"
+            issues=$((issues + 1))
+        fi
+    done < <(jq -r '.accounts | to_entries[] | [.key, .value.email] | @tsv' "$SEQUENCE_FILE" 2>/dev/null)
+    echo ""
+
+    # Check 2: Active account consistency
+    echo -e "${COLOR_BOLD}Check 2: Active account state${COLOR_RESET}"
+    local active_num
+    active_num=$(jq -r '.activeAccountNumber' "$SEQUENCE_FILE")
+    local active_email
+    active_email=$(jq -r --arg n "$active_num" '.accounts[$n].email // empty' "$SEQUENCE_FILE")
+    local current_email
+    current_email=$(get_current_account 2>/dev/null || echo "none")
+
+    if [[ "$current_email" == "none" ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} No active account in Claude Code config"
+        issues=$((issues + 1))
+    elif [[ "$current_email" != "$active_email" ]]; then
+        echo -e "  ${COLOR_YELLOW}${SYM_WARN}${COLOR_RESET} Active email mismatch:"
+        echo "    Claude Code: $current_email"
+        echo "    CCM expects: $active_email (Account-$active_num)"
+        issues=$((issues + 1))
+    else
+        echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Active account matches: $current_email (Account-$active_num)"
+    fi
+    echo ""
+
+    # Check 3: Keychain consistency (macOS only)
+    local platform
+    platform=$(detect_platform)
+    if [[ "$platform" == "macos" ]]; then
+        echo -e "${COLOR_BOLD}Check 3: Keychain entries (macOS)${COLOR_RESET}"
+        local keychain_ok=1
+        if security find-generic-password -s "claude-oauth-credentials" -w &>/dev/null; then
+            echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Keychain entry for claude-oauth-credentials exists"
+        else
+            echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} Missing Keychain entry for claude-oauth-credentials"
+            keychain_ok=0
+            issues=$((issues + 1))
+        fi
+        echo ""
+    fi
+
+    # Check 4: Profile directories
+    if [[ -d "$PROFILES_DIR" ]]; then
+        echo -e "${COLOR_BOLD}Check 4: Profile directories${COLOR_RESET}"
+        for profile_dir in "$PROFILES_DIR"/*/; do
+            [[ -d "$profile_dir" ]] || continue
+            local pname
+            pname=$(basename "$profile_dir")
+            if [[ -f "$profile_dir/.claude.json" ]]; then
+                echo -e "  ${COLOR_GREEN}${SYM_OK}${COLOR_RESET} Profile '$pname' has valid config"
+            else
+                echo -e "  ${COLOR_RED}${SYM_ERR}${COLOR_RESET} Profile '$pname' is missing .claude.json"
+                issues=$((issues + 1))
+            fi
+        done
+        echo ""
+    fi
+
+    # Summary
+    if [[ "$issues" -eq 0 ]]; then
+        log_success "No issues found. Credential state is consistent."
+    else
+        echo -e "${COLOR_BOLD}Found $issues issue(s).${COLOR_RESET}"
+        echo ""
+        echo "Remediation steps:"
+        echo "  1. Run 'ccm verify' to check all accounts"
+        echo "  2. Re-add missing accounts with 'ccm switch <account>' then 'ccm add'"
+        echo "  3. For profile issues, delete and recreate: ccm profiles delete <name>"
+    fi
+}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Statusline Module — Claude Code Status Bar Integration
@@ -5536,6 +6449,16 @@ RL_FMT=""
 RL_FMT+="$(_fmt_rl "$RL5_PCT" "$RL5_RESET" "5hr")"
 RL_FMT+="$(_fmt_rl "$RL7_PCT" "$RL7_RESET" "7d")"
 
+# ── Write rate limits to shared file for ccm watch ──
+RL_FILE="$HOME/.claude-switch-backup/rate-limits.json"
+if [[ -n "$RL5_PCT" && "$RL5_PCT" != "null" ]] || [[ -n "$RL7_PCT" && "$RL7_PCT" != "null" ]]; then
+    mkdir -p "$(dirname "$RL_FILE")" 2>/dev/null
+    cat > "${RL_FILE}.tmp" 2>/dev/null << RLJSON
+{"five_hour":{"used_percentage":${RL5_PCT:-0},"resets_at":${RL5_RESET:-0}},"seven_day":{"used_percentage":${RL7_PCT:-0},"resets_at":${RL7_RESET:-0}},"updated_at":"$(date -u +%Y-%m-%dT%H:%M:%SZ)"}
+RLJSON
+    mv "${RL_FILE}.tmp" "$RL_FILE" 2>/dev/null
+fi
+
 # ── Git branch ──
 BRANCH=""
 if [[ -n "$CWD" ]] && command -v git &>/dev/null; then
@@ -5549,14 +6472,16 @@ if [[ -n "$CWD" ]]; then
     [[ ${#DIR_SHORT} -gt 30 ]] && DIR_SHORT="…${DIR_SHORT: -29}"
 fi
 
-# ── CCM account data (direct file read) ──
+# ── CCM account data (direct file read + env var fallback) ──
 SEQ="$HOME/.claude-switch-backup/sequence.json"
 CONF="$HOME/.claude/.claude.json"
 [[ -f "$CONF" ]] || CONF="$HOME/.claude.json"
 
 ALIAS="" EMAIL_SHORT="" HEALTH="" TOTAL_ACCTS=0
 if [[ -f "$SEQ" ]] && [[ -f "$CONF" ]]; then
-    EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
+    # Use CLAUDE_CODE_USER_EMAIL env var if available (v2.1.51+), fall back to config file
+    EMAIL="${CLAUDE_CODE_USER_EMAIL:-}"
+    [[ -z "$EMAIL" ]] && EMAIL=$(jq -r '.oauthAccount.emailAddress // empty' "$CONF" 2>/dev/null)
     if [[ -n "$EMAIL" ]]; then
         EMAIL_SHORT="$EMAIL"
         ACCT_DATA=$(jq -r --arg e "$EMAIL" '
@@ -5598,7 +6523,16 @@ if [[ "$TOTAL_ACCTS" -ge 2 ]]; then
         degraded) H="${Y}●${R}" ;;
         *)        H="${RED}●${R}" ;;
     esac
-    echo -e "${C}${ACCT_LABEL}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H}"
+    # Check for bound account in current directory
+    BOUND=""
+    if [[ -n "$CWD" ]] && [[ -f "$SEQ" ]]; then
+        BOUND_ACCT=$(jq -r --arg p "$CWD" '.bindings[$p] // empty' "$SEQ" 2>/dev/null)
+        if [[ -n "$BOUND_ACCT" ]]; then
+            BOUND_ALIAS=$(jq -r --arg n "$BOUND_ACCT" '.accounts[$n].alias // ("acct-" + $n)' "$SEQ" 2>/dev/null)
+            BOUND=" ${D}· bound:${R} ${C}${BOUND_ALIAS}${R}"
+        fi
+    fi
+    echo -e "${C}${ACCT_LABEL}${R} ${D}(${EMAIL_SHORT})${R} ${D}·${R} ${TOTAL_ACCTS} accounts ${D}·${R} ${H}${BOUND}"
 fi
 STATUSLINE_EOF
 
@@ -6038,10 +6972,16 @@ main() {
     case "${1:-}" in
         add)            cmd_add_account ;;
         remove)         shift; cmd_remove_account "$@" ;;
-        switch)         shift; if [[ $# -gt 0 ]]; then cmd_switch_to "$@"; else cmd_switch; fi ;;
+        switch)         shift;
+                        if [[ "${1:-}" == "--isolated" ]]; then
+                            shift; switch_isolated "$@"
+                        elif [[ $# -gt 0 ]]; then
+                            cmd_switch_to "$@"
+                        else
+                            cmd_switch
+                        fi ;;
         undo)           cmd_undo ;;
         list)           cmd_list ;;
-        status)         shift; cmd_status "$@" ;;
         alias)          shift; cmd_set_alias "$@" ;;
         verify)         shift; cmd_verify "$@" ;;
         history)        cmd_history ;;
@@ -6051,15 +6991,21 @@ main() {
         bind)           shift; cmd_bind "$@" ;;
         unbind)         shift; cmd_unbind "$@" ;;
         hook)           cmd_hook ;;
-        interactive)    cmd_interactive ;;
+        profiles)       shift; cmd_profiles "$@" ;;
+        watch)          shift; cmd_watch "$@" ;;
+        recover)        cmd_recover ;;
+        setup)          cmd_setup ;;
         session)        shift; cmd_session "$@" ;;
         env)            shift; cmd_env "$@" ;;
         usage)          shift; cmd_usage "$@" ;;
         doctor)         shift; cmd_doctor "$@" ;;
         clean)          shift; cmd_clean "$@" ;;
-        optimize)       cmd_optimize ;;
-        launch)         shift; cmd_launch "$@" ;;
         init)           shift; cmd_init "$@" ;;
+        # Deprecated in v4.0 — show migration notice
+        status)         log_info "Removed in v4.0. Use 'ccm list' or Claude Code's native /status."; exit 0 ;;
+        interactive)    log_info "Removed in v4.0. Use direct CLI commands instead."; exit 0 ;;
+        optimize)       log_info "Removed in v4.0. Use Claude Code's native /insights command."; exit 0 ;;
+        launch)         log_info "Removed in v4.0. Use 'claude --permission-mode auto' or /sandbox directly."; exit 0 ;;
         permissions)    shift; cmd_permissions "$@" ;;
         statusline)     shift; cmd_statusline "$@" ;;
         help)           shift; show_help "$@" ;;

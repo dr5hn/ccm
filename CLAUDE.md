@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-CCM (Claude Code Manager) is a Bash CLI toolkit for managing multiple Claude Code accounts, sessions, environments, and health. Single-file architecture (`ccm.sh`, ~6000 lines) with a static landing page (`index.html`), a statusline visual guide (`statusline.html`), and a standalone statusline installer (`statusline.sh`).
+CCM (Claude Code Manager) is a Bash CLI toolkit for managing multiple Claude Code accounts, sessions, environments, and health. Single-file architecture (`ccm.sh`, ~6600 lines) with a static landing page (`index.html`), a statusline visual guide (`statusline.html`), and a standalone statusline installer (`statusline.sh`).
 
 ## Commands
 
@@ -19,6 +19,10 @@ bash ccm.sh help
 bash ccm.sh permissions audit
 bash ccm.sh clean tmp --days 365   # should find nothing
 bash ccm.sh usage history --days 1
+bash ccm.sh profiles list
+bash ccm.sh watch status
+bash ccm.sh recover
+bash ccm.sh session archives
 
 # Landing page — open index.html directly in browser, no build step
 # Statusline guide — open statusline.html directly in browser
@@ -35,18 +39,22 @@ The script follows a strict top-to-bottom section layout:
 1. **Constants & Utilities** (lines 1–550) — `CCM_VERSION`, color init, platform detection (`detect_platform()` → macos/wsl/linux), JSON helpers, validation functions, `write_json()` (atomic: temp file → validate → mv)
 2. **Credential Management** (lines 261–370) — macOS uses Keychain, Linux/WSL uses file-based storage with atomic writes (temp + mv). `read_credentials()`/`write_credentials()` are platform-dispatched
 3. **Sequence & Cache** (lines 370–550) — `sequence.json` is the account registry (schema v3.1, auto-migrates from v1/v2/v3). `resolve_account_identifier()` matches by number, email, or alias. Bindings stored in `sequence.json` under `"bindings"` key
-4. **Session Management** (lines 550–1160) — `session list|info|search|relocate|clean`. Path encoding: `/` → `-` for directory names under `~/.claude/projects/`
-5. **Account Management** (lines 1160–2350) — Switching (checks project bindings first), reordering (two-pass credential rename with pre-validated JSON), bind/unbind, shell hook (`ccm hook`), export/import
-6. **Interactive Mode** (lines 2800–3040) — Menu-driven TUI with ASCII art
-7. **Help System** (lines 3040–3340) — Topic-based help with `show_help()`, covers all modules
-8. **Environment Snapshots** (lines 3340–3700) — Capture/restore settings.json, MCP config, CLAUDE.md (strips tokens on save)
-9. **Usage Module** (lines 3700–4060) — `usage summary|top|history` (history parses JSONL for token analytics using jq)
-10. **Health & Maintenance** (lines 4060–5050) — `doctor` (13 checks), `clean` (9 targets + all), `optimize` (token analysis), `permissions audit` (duplicate/dead rule detection)
-11. **Launch Module** (lines 5050–5320) — `launch auto|yolo|plan|safe` wraps claude CLI with terminal reset on exit
-12. **Statusline Module** (lines 5320–5580) — `statusline install|remove` generates a bash script that reads Claude Code session JSON via stdin
-13. **Init Module** (lines 5580–5780) — `init` auto-generates `.claudeignore` by detecting project type from manifest files
-14. **Permissions Module** (lines 5780–5920) — `permissions audit [--fix]` scans settings.json for duplicate/contradictory/dead rules
-15. **Main Entry** (lines 5920–5980) — `--no-color` parsing, dependency checks, case-based command dispatch
+4. **Session Management** (lines 550–1160) — `session list|info|search|relocate|clean|archive|restore|archives`. Path encoding: `/` → `-` for directory names under `~/.claude/projects/`
+5. **Account Management** (lines 1160–2800) — Switching (checks project bindings first, supports `--isolated` for CLAUDE_CONFIG_DIR profiles), reordering (two-pass credential rename with pre-validated JSON), bind/unbind, shell hook (`ccm hook`), export/import
+6. **Help System** (lines 2870–3250) — Topic-based help with `show_help()`, covers all modules including profiles, watch, recover, setup
+7. **Environment Snapshots** (lines 3250–3700) — Capture/restore settings.json, MCP config, CLAUDE.md (strips tokens on save)
+8. **Usage Module** (lines 3700–4060) — `usage summary|top|history|dashboard|compare` (history parses JSONL for token analytics using jq, dashboard attributes usage to accounts via switch history)
+9. **Health & Maintenance** (lines 4060–4880) — `doctor` (13 checks), `clean` (9 targets + all), `permissions audit` (duplicate/dead rule detection)
+10. **Profiles Module** (lines 4880–5050) — `switch_isolated` creates CLAUDE_CONFIG_DIR profiles, `cmd_profiles` routes list/sync/delete
+11. **Watch Module** (lines 5050–5280) — `cmd_watch` routes start/stop/status, background polling of `rate-limits.json`
+12. **Usage Dashboard Module** (lines 5280–5510) — `usage_dashboard` with per-account token attribution, `format_token_count` helper
+13. **Session Archive Module** (lines 5510–5720) — `session_archive` compresses old JSONL to tar.gz, `session_restore`, `session_archives_list`
+14. **Setup Module** (lines 5720–5870) — `cmd_setup` interactive first-run wizard (6 steps)
+15. **Recover Module** (lines 5870–5990) — `cmd_recover` checks credential consistency (4 checks)
+16. **Statusline Module** (lines 5990–6230) — `statusline install|remove` generates a bash script that reads Claude Code session JSON via stdin, writes rate-limits.json for the watcher
+17. **Init Module** (lines 6230–6410) — `init` auto-generates `.claudeignore` by detecting project type from manifest files
+18. **Permissions Module** (lines 6410–6580) — `permissions audit [--fix]` scans settings.json for duplicate/contradictory/dead rules
+19. **Main Entry** (lines 6580–6660) — `--no-color` parsing, dependency checks, case-based command dispatch with deprecation notices for removed commands
 
 ### Data layout
 
@@ -55,7 +63,16 @@ The script follows a strict top-to-bottom section layout:
 ├── sequence.json              # Account registry (metadata, history, aliases, bindings)
 ├── credentials/               # Per-account OAuth backups (atomic writes)
 ├── configs/                   # Per-account config backups
-└── snapshots/                 # Environment snapshots
+├── snapshots/                 # Environment snapshots
+├── profiles/                  # Isolated CLAUDE_CONFIG_DIR profiles (NEW in v4.0)
+│   ├── work/                  # Complete Claude Code config directory
+│   └── personal/
+├── archives/                  # Compressed session archives (NEW in v4.0)
+│   ├── index.json             # Archive metadata
+│   └── *.tar.gz               # Compressed sessions
+├── usage-history.json         # Per-account usage aggregates (NEW in v4.0)
+├── rate-limits.json           # Latest rate limit snapshot from statusline (NEW in v4.0)
+└── watch.pid                  # Background watcher PID (NEW in v4.0)
 
 ~/.claude/projects/            # Claude Code session directories
 └── -Users-darshan-project/    # Encoded path (/ → -)
@@ -72,6 +89,8 @@ The script follows a strict top-to-bottom section layout:
 - **Numeric validation**: All `--days`, `--limit`, `--keep` args validated with regex before use (prevents `set -e` aborts from `find -mtime +NaN`)
 - **Permission preservation**: When writing to `settings.json`, original file permissions are read with `stat` and restored after write (avoids forcing 600 on a 644 file)
 - **Orphan detection**: Process orphan detection (`ppid == 1`) is gated to macOS only — unreliable on Linux/WSL where systemd children legitimately have ppid=1
+- **CLAUDE_CONFIG_DIR isolation**: Profiles create complete config directories that Claude Code reads via the `CLAUDE_CONFIG_DIR` env var, enabling true concurrent sessions
+- **Statusline as data bridge**: The statusline script writes rate limit data to `rate-limits.json` on every prompt render, which the `ccm watch` background process polls
 
 ## Version Bumping
 
@@ -87,15 +106,17 @@ The CCM skill (for Claude Code / Cursor / Codex / Gemini CLI) lives in two locat
 - `ccm/SKILL.md` — tracked in git, published via `npx skills add dr5hn/ccm@ccm`
 - `.agents/skills/ccm/SKILL.md` — local copy, gitignored (`.agents/` in `.gitignore`)
 
-When updating the skill, edit `ccm/SKILL.md` and copy to `.agents/skills/ccm/SKILL.md`. The skill description triggers on keywords like "ccm", "switch accounts", "clean tmp", "statusline", "bind", "usage history", etc.
+When updating the skill, edit `ccm/SKILL.md` and copy to `.agents/skills/ccm/SKILL.md`. The skill description triggers on keywords like "ccm", "switch accounts", "clean tmp", "statusline", "bind", "usage history", "profiles", "isolated", "watch", "rate limit", "dashboard", "session archive", "setup", "recover", etc.
 
 ## Statusline
 
 The statusline script is embedded in `ccm.sh` as a heredoc inside `cmd_statusline()`. It is also duplicated as the standalone `statusline.sh` installer. **When modifying the statusline, update both locations.**
 
-The script reads Claude Code session JSON from stdin (piped by Claude Code automatically) and account data directly from `sequence.json` + `.claude.json` files (no `ccm` binary dependency). The `.claude.json` config path has a fallback: checks `~/.claude/.claude.json` first, then `~/.claude.json`.
+The script reads Claude Code session JSON from stdin (piped by Claude Code automatically) and account data directly from `sequence.json` + `.claude.json` files (no `ccm` binary dependency). The `.claude.json` config path has a fallback: checks `~/.claude/.claude.json` first, then `~/.claude.json`. Also uses `CLAUDE_CODE_USER_EMAIL` env var (v2.1.51+) as a fallback for account detection.
 
 Token count uses the sum of `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` from `context_window.current_usage` (not `total_input_tokens`) to match Claude Code's own display.
+
+The statusline also writes rate limit data to `~/.claude-switch-backup/rate-limits.json` on each invocation, which the `ccm watch` background process monitors.
 
 ## Landing Page (index.html)
 
@@ -110,9 +131,20 @@ When releasing a new version, these files must all be updated:
 4. `ccm/SKILL.md`: new commands, triggers, workflows (then copy to `.agents/skills/ccm/`)
 5. `index.html`: feature cards, command accordion, terminal demos
 6. `statusline.sh`: if statusline script changed (keep in sync with heredoc in ccm.sh)
-7. GitHub release via `gh release create` or `./release.sh`
+7. `CLAUDE.md`: update architecture section with new line ranges and modules
+8. GitHub release via `gh release create` or `./release.sh`
 
-The `./release.sh` script only handles steps 1, 2, and 7 automatically. Steps 3–6 are manual.
+The `./release.sh` script only handles steps 1, 2, and 8 automatically. Steps 3–7 are manual.
+
+## Removed Features (v4.0)
+
+These commands were removed in v4.0 because Claude Code now has native equivalents:
+- `ccm status` → use `ccm list` or Claude Code's `/status`
+- `ccm interactive` → use direct CLI commands
+- `ccm optimize` → use Claude Code's `/insights`
+- `ccm launch` → use Claude Code's `--permission-mode` flags
+
+Removed commands show deprecation notices with migration instructions.
 
 ## Conventions
 
@@ -135,3 +167,5 @@ The `./release.sh` script only handles steps 1, 2, and 7 automatically. Steps 3�
 - **`jq -s 'from_entries'` expects `{"key":...,"value":...}` objects** — plain `"k": v` fragments are not valid input
 - **Session JSONL files can be multi-MB** — always use `grep -qF` (fixed-string) not `grep -q` (regex) for path matching to avoid catastrophic backtracking
 - **Reorder credential rename** — sequence.json is written BEFORE file renames so recovery is possible if interrupted mid-rename
+- **CLAUDE_CONFIG_DIR on macOS** — Keychain entries are global; isolated profiles use file-based credential storage for true isolation
+- **Heredoc within heredoc** — the statusline heredoc inside `cmd_statusline()` uses `STATUSLINE_EOF` delimiter; the rate-limits JSON write inside it uses `RLJSON` to avoid delimiter collision
