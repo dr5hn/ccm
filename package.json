@@ -1,5 +1,5 @@
 {
-  "name": "ccm-cli",
+  "name": "@dr5hn/ccm",
   "version": "4.0.0",
   "description": "CLI toolkit for managing multiple Claude Code accounts, sessions, environments, and health",
   "bin": {
