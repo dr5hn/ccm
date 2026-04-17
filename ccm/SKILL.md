@@ -1,6 +1,6 @@
 ---
 name: ccm
-description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, profiles, isolated, concurrent sessions, watch, rate limit, auto-switch, dashboard, session archive, setup wizard, recover, usage dashboard, usage compare, claudeignore, permission rules, statusline, status bar, or says "ccm", "doctor", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "init", "permissions audit", "statusline", "ccm watch", "ccm profiles", "ccm setup", "ccm recover".
+description: Claude Code Manager — manage accounts, sessions, environments, and optimize token usage. Use when the user mentions switching Claude accounts, cleaning up sessions, environment snapshots, disk usage, token optimization, Claude Code health check, orphaned sessions, orphaned processes, tmp files, MCP audit, project bindings, session search, token usage history, account reorder, profiles, isolated, concurrent sessions, CLAUDE_CONFIG_DIR, isolated hook, watch, rate limit, auto-switch, dashboard, session archive, setup wizard, recover, usage dashboard, usage compare, claudeignore, permission rules, statusline, status bar, or says "ccm", "doctor", "clean cache", "clean tmp", "session list", "session search", "env snapshot", "bind", "unbind", "reorder", "usage history", "init", "permissions audit", "statusline", "ccm watch", "ccm profiles", "ccm setup", "ccm recover", "ccm hook", "hook --isolated".
 allowed-tools: Bash(ccm *), Bash(~/.ccm/bin/ccm *), Bash(curl -fsSL *install.sh*)
 ---
 
@@ -42,7 +42,8 @@ This installs to `~/.ccm/bin/ccm` — no sudo required. After install, the user 
 | `ccm bind [path] <account>` | Bind project directory to an account |
 | `ccm unbind [path]` | Remove project binding |
 | `ccm bind list` | Show all project bindings |
-| `ccm hook` | Output shell hook for auto-switch on cd |
+| `ccm hook` | Output shell hook for auto-switch on cd (global mode — rewrites creds) |
+| `ccm hook --isolated` | Shell hook that sets `CLAUDE_CONFIG_DIR` per-shell on cd — safe for concurrent terminals |
 | `ccm verify [id]` | Verify backup integrity |
 | `ccm history` | Show recent switch history |
 | `ccm export <path>` | Export accounts to archive |
@@ -167,9 +168,16 @@ ccm bind list                      # show all bindings
 
 ### Auto-switch on cd (shell hook)
 ```bash
-# Add to ~/.zshrc or ~/.bashrc:
+# Add to ~/.zshrc or ~/.bashrc — pick ONE mode:
+
+# Global mode (simple, rewrites ~/.claude creds on each cd):
 eval "$(ccm hook)"
-# Now entering a bound directory auto-switches accounts
+
+# Isolated mode (recommended when you use multiple terminals at once):
+eval "$(ccm hook --isolated)"
+# Sets CLAUDE_CONFIG_DIR in THIS shell only; concurrent terminals stay on
+# their own accounts without fighting over global credentials.
+
 cd ~/work/project    # → auto-switches to work account
 cd ~/personal/side   # → auto-switches to personal account
 ```

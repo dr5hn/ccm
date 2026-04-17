@@ -59,7 +59,7 @@ CCM addresses the most upvoted feature requests in [anthropics/claude-code](http
 - **Account aliases** — friendly names like `work` or `personal` for quick access
 - **Account reorder** — rearrange account positions with automatic credential renaming
 - **Project bindings** — bind directories to accounts, auto-switch with `ccm switch`
-- **Shell hook** — `eval "$(ccm hook)"` auto-switches accounts when you `cd` into bound directories (zero per-cd overhead)
+- **Shell hook** — `eval "$(ccm hook)"` auto-switches accounts when you `cd` into bound directories (zero per-cd overhead). Use `eval "$(ccm hook --isolated)"` for per-shell `CLAUDE_CONFIG_DIR` isolation so concurrent terminals don't clobber each other
 - **Switch history and undo** — track switches and revert instantly
 - **Health verification** — validate backup integrity for all accounts
 - **Export/Import** — backup and restore account configurations as portable archives
@@ -220,7 +220,8 @@ ccm reorder <from> <to>        # Reorder account positions
 ccm bind [path] <account>      # Bind project directory to an account
 ccm unbind [path]              # Remove project binding
 ccm bind list                  # Show all project bindings
-ccm hook                       # Output shell hook for auto-switch on cd
+ccm hook                       # Output shell hook for auto-switch on cd (global mode)
+ccm hook --isolated            # Hook that sets CLAUDE_CONFIG_DIR per-shell (concurrent-terminal safe)
 ccm verify [id]                # Verify backup integrity
 ccm history                    # View switch history
 ccm export <path>              # Export accounts to archive
@@ -345,7 +346,11 @@ ccm bind list                      # show all bindings
 
 # Auto-switch on cd (add to ~/.zshrc or ~/.bashrc):
 eval "$(ccm hook)"
-# cd ~/work/project → auto-switches to work account
+# cd ~/work/project → auto-switches to work account (rewrites global creds)
+
+# Recommended for concurrent terminals — each shell gets its own isolated profile:
+eval "$(ccm hook --isolated)"
+# cd ~/work/project → exports CLAUDE_CONFIG_DIR in this shell only, no global rewrite
 ```
 
 ### New Project Setup
