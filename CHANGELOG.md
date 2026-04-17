@@ -2,6 +2,15 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [4.1.0] - 2026-04-17
+### Added
+- `ccm hook --isolated` — emit a shell hook that activates isolated CLAUDE_CONFIG_DIR profiles per shell on `cd` into a bound directory, instead of rewriting the global active account. Concurrent terminals in different bound directories no longer clobber each other's credentials.
+- `ccm switch --isolated --quiet` — print only the profile path to stdout for use in command substitution; creates the profile on demand.
+### Fixed
+- Shell auto-switch hook was silently a no-op under zsh because `_ccm_bindings["$path"]=val` stored keys with literal quote characters, making `${_ccm_bindings[$PWD]}` lookups always miss. Changed to unquoted subscript so bash and zsh agree on the key.
+- `switch_isolated` now returns on error instead of calling `exit`, preserving the calling shell when invoked programmatically (e.g. from the hook).
+
+
 ## [4.0.0] - 2026-04-03
 
 ### Added
