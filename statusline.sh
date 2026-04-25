@@ -37,23 +37,30 @@ input=$(cat)
 R="\033[0m" C="\033[36m" D="\033[90m" G="\033[32m" Y="\033[33m" RED="\033[31m"
 
 # ── Extract all session data in a single jq call for performance ──
-# Uses tab-delimited output with read instead of eval to prevent command injection
-IFS=$'\t' read -r PCT IN_TOK CC_TOK CR_TOK COST DUR_MS API_MS CWD RL5_PCT RL5_RESET RL7_PCT RL7_RESET CC_VER < <(
+# Uses ASCII Unit Separator (\x1f) so empty fields are preserved.
+# Tab is a whitespace IFS char — bash read collapses consecutive tabs, which
+# would corrupt parsing whenever an optional field (e.g. rate limits) is empty.
+IFS=$'\x1f' read -r PCT IN_TOK CC_TOK CR_TOK COST DUR_MS API_MS CWD RL5_PCT RL5_RESET RL7_PCT RL7_RESET CC_VER MODEL_NAME EFFORT SESSION_NAME LINES_ADD LINES_DEL < <(
     echo "$input" | jq -r '[
-        (.context_window.used_percentage // 0 | floor),
-        (.context_window.current_usage.input_tokens // 0),
-        (.context_window.current_usage.cache_creation_input_tokens // 0),
-        (.context_window.current_usage.cache_read_input_tokens // 0),
-        (.cost.total_cost_usd // 0),
-        (.cost.total_duration_ms // 0),
-        (.cost.total_api_duration_ms // 0),
+        (.context_window.used_percentage // 0 | floor | tostring),
+        (.context_window.current_usage.input_tokens // 0 | tostring),
+        (.context_window.current_usage.cache_creation_input_tokens // 0 | tostring),
+        (.context_window.current_usage.cache_read_input_tokens // 0 | tostring),
+        (.cost.total_cost_usd // 0 | tostring),
+        (.cost.total_duration_ms // 0 | tostring),
+        (.cost.total_api_duration_ms // 0 | tostring),
         (.cwd // ""),
         (.rate_limits.five_hour.used_percentage // "" | tostring),
         (.rate_limits.five_hour.resets_at // "" | tostring),
         (.rate_limits.seven_day.used_percentage // "" | tostring),
         (.rate_limits.seven_day.resets_at // "" | tostring),
-        (.version // "")
-    ] | @tsv' 2>/dev/null
+        (.version // ""),
+        (.model.display_name // .model.id // ""),
+        (.effort.level // ""),
+        (.session_name // ""),
+        (.cost.total_lines_added // 0 | tostring),
+        (.cost.total_lines_removed // 0 | tostring)
+    ] | join("\u001f")' 2>/dev/null
 )
 
 TOKENS=$((IN_TOK + CC_TOK + CR_TOK))
@@ -193,10 +200,39 @@ if [[ "$PCT_NUM" -ge 80 ]]; then
     COMPACT_WARN=" ${D}·${R} ${Y}⚠ /compact${R}"
 fi
 
-# ── LINE 1: Context + tokens + cost + duration + burn rate + rate limits ──
+# ── Model + reasoning effort + session name (each segment hidden when absent) ──
+MODEL_FMT=""
+if [[ -n "$MODEL_NAME" ]]; then
+    MODEL_FMT="${C}${MODEL_NAME}${R}"
+    if [[ -n "$EFFORT" ]]; then
+        case "$EFFORT" in
+            low)        EC="$D" ;;
+            medium)     EC="$G" ;;
+            high)       EC="$Y" ;;
+            xhigh|max)  EC="$RED" ;;
+            *)          EC="$D" ;;
+        esac
+        MODEL_FMT+=" ${D}·${R} ${EC}${EFFORT}${R}"
+    fi
+fi
+if [[ -n "$SESSION_NAME" ]]; then
+    [[ -n "$MODEL_FMT" ]] && MODEL_FMT+=" ${D}·${R} "
+    MODEL_FMT+="${C}${SESSION_NAME}${R}"
+fi
+
+# ── Lines added/removed (only shown when either is non-zero) ──
+LINES_FMT=""
+if [[ "${LINES_ADD:-0}" -gt 0 ]] || [[ "${LINES_DEL:-0}" -gt 0 ]]; then
+    LINES_FMT=" ${D}·${R} ${G}+${LINES_ADD}${R} ${RED}-${LINES_DEL}${R}"
+fi
+
+# ── LINE 1: Model + effort + session (own line, omitted when all are absent) ──
+[[ -n "$MODEL_FMT" ]] && echo -e "$MODEL_FMT"
+
+# ── LINE 2: Context + tokens + cost + duration + burn + lines diff + rate limits ──
 L1="${BAR_C}${BAR}${R} ${PCT_NUM}% ${D}·${R} ${TOK_FMT} tokens ${D}·${R} ${COST_FMT} ${D}·${R} ${DUR_FMT}"
 [[ -n "$BURN_FMT" ]] && L1+=" ${D}·${R} ${BURN_FMT}"
-L1+="${RL_FMT}"
+L1+="${LINES_FMT}${RL_FMT}"
 echo -e "$L1"
 
 # ── LINE 2: Directory + branch + version + compact warning ──
