@@ -89,6 +89,8 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
             <span class="c-cyan">Opus 4.7</span>
             <span class="c-dim"> · </span>
             <span class="c-yellow">high</span>
+            <span class="c-dim"> · </span>
+            <span class="c-cyan">refactor-auth</span>
         </div>
         <div class="line">
             <span class="c-green">▓▓▓░░░░░░░</span>
@@ -100,7 +102,10 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
             <span class="c-dim"> · </span>
             <span class="c-white">1h33m</span>
             <span class="c-dim"> · </span>
-            <span class="c-white">4K/m</span>
+            <span class="c-white">4K/m</span> <span class="c-dim">·</span> <span class="c-green">+156</span><span class="c-red"> -23</span>
+            <span class="c-dim"> · </span>
+            <span class="c-green">+156</span>
+            <span class="c-red"> -23</span>
             <span class="c-dim"> · </span>
             <span class="c-green">5hr: 23%</span>
             <span class="c-dim"> ↻16:30</span>
@@ -140,84 +145,98 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker green">3</div>
+            <div class="anno-marker cyan">3</div>
+            <div class="anno-text">
+                <div class="anno-title">Session Name</div>
+                <div class="anno-desc">Custom session name set via <code>--name</code> or <code>/rename</code>. Disambiguates parallel sessions. Hidden when no custom name is set.</div>
+            </div>
+        </div>
+        <div class="anno">
+            <div class="anno-marker green">4</div>
             <div class="anno-text">
                 <div class="anno-title">Context Window</div>
                 <div class="anno-desc">Visual bar + percentage. Green &lt;70%, yellow 70-89%, red 90%+. Shows how full your context is.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker cyan">4</div>
+            <div class="anno-marker cyan">5</div>
             <div class="anno-text">
                 <div class="anno-title">Token Count</div>
                 <div class="anno-desc">Total tokens in context (input + cache). Matches Claude Code's own token display. Formatted as K/M.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker cyan">5</div>
+            <div class="anno-marker cyan">6</div>
             <div class="anno-text">
                 <div class="anno-title">Session Cost</div>
                 <div class="anno-desc">Cumulative USD cost for this session. Resets when you start a new conversation.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker dim">6</div>
+            <div class="anno-marker dim">7</div>
             <div class="anno-text">
                 <div class="anno-title">Session Duration</div>
                 <div class="anno-desc">How long this session has been running. Formatted as Xs, Xm, or XhXm.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker dim">7</div>
+            <div class="anno-marker dim">8</div>
             <div class="anno-text">
                 <div class="anno-title">Burn Rate</div>
                 <div class="anno-desc">Average tokens consumed per minute. Helps predict when you'll hit rate limits or need to compact.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker green">8</div>
+            <div class="anno-marker green">9</div>
+            <div class="anno-text">
+                <div class="anno-title">Lines Added / Removed</div>
+                <div class="anno-desc">Total lines of code added (green +) and removed (red -) by the session. Hidden until the session has actually changed code.</div>
+            </div>
+        </div>
+        <div class="anno">
+            <div class="anno-marker green">10</div>
             <div class="anno-text">
                 <div class="anno-title">5-Hour Rate Limit</div>
                 <div class="anno-desc">Pro/Max plan rolling window usage. Shows reset time. Color-coded: green &lt;60%, yellow 60-79%, red 80%+.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker green">9</div>
+            <div class="anno-marker green">11</div>
             <div class="anno-text">
                 <div class="anno-title">7-Day Rate Limit</div>
                 <div class="anno-desc">Max plan weekly cap. Only appears for Max subscribers. Shows when the window resets.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker cyan">10</div>
+            <div class="anno-marker cyan">12</div>
             <div class="anno-text">
                 <div class="anno-title">Project Directory</div>
                 <div class="anno-desc">Current working directory, truncated to 30 chars with ~ for home. Quick project identification.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker green">11</div>
+            <div class="anno-marker green">13</div>
             <div class="anno-text">
                 <div class="anno-title">Git Branch</div>
                 <div class="anno-desc">Current branch name. Essential for multi-branch workflows and code review.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker dim">12</div>
+            <div class="anno-marker dim">14</div>
             <div class="anno-text">
                 <div class="anno-title">Claude Code Version</div>
                 <div class="anno-desc">Running version of Claude Code. Useful for debugging or checking if an update is needed.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker cyan">13</div>
+            <div class="anno-marker cyan">15</div>
             <div class="anno-text">
                 <div class="anno-title">Active Account</div>
                 <div class="anno-desc">Shows alias + email when you have 2+ managed accounts via CCM. Hidden for single-account users.</div>
             </div>
         </div>
         <div class="anno">
-            <div class="anno-marker green">14</div>
+            <div class="anno-marker green">16</div>
             <div class="anno-text">
                 <div class="anno-title">Account Health</div>
                 <div class="anno-desc">Green ● healthy, yellow ● degraded, red ● unhealthy. Quick credential status check.</div>
@@ -232,8 +251,8 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
     <div class="scenario">
         <div class="scenario-title">Single account user (2 lines)</div>
         <div class="scenario-terminal">
-            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span></div>
-            <div><span class="c-green">▓▓▓▓░░░░░░</span> <span class="c-white">45%</span> <span class="c-dim">·</span> <span class="c-white">200K tokens</span> <span class="c-dim">·</span> <span class="c-white">$3.21</span> <span class="c-dim">·</span> <span class="c-white">30m</span> <span class="c-dim">·</span> <span class="c-white">7K/m</span></div>
+            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span> <span class="c-dim">·</span> <span class="c-cyan">refactor-auth</span></div>
+            <div><span class="c-green">▓▓▓▓░░░░░░</span> <span class="c-white">45%</span> <span class="c-dim">·</span> <span class="c-white">200K tokens</span> <span class="c-dim">·</span> <span class="c-white">$3.21</span> <span class="c-dim">·</span> <span class="c-white">30m</span> <span class="c-dim">·</span> <span class="c-white">7K/m</span> <span class="c-dim">·</span> <span class="c-green">+156</span><span class="c-red"> -23</span></div>
             <div><span class="c-cyan">~/Projects/my-app</span> <span class="c-dim">·</span> <span class="c-green">feat/auth</span> <span class="c-dim">· v1.0.80</span></div>
         </div>
         <div class="scenario-note">No account line — clean 2-line display. No rate limits for API key users.</div>
@@ -242,8 +261,8 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
     <div class="scenario">
         <div class="scenario-title">Pro/Max user with rate limits (2 lines)</div>
         <div class="scenario-terminal">
-            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span></div>
-            <div><span class="c-green">▓▓▓░░░░░░░</span> <span class="c-white">31%</span> <span class="c-dim">·</span> <span class="c-white">326K tokens</span> <span class="c-dim">·</span> <span class="c-white">$54.57</span> <span class="c-dim">·</span> <span class="c-white">1h33m</span> <span class="c-dim">·</span> <span class="c-white">4K/m</span> <span class="c-dim">·</span> <span class="c-green">5hr: 23%</span> <span class="c-dim">↻16:30</span> <span class="c-dim">·</span> <span class="c-green">7d: 41%</span></div>
+            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span> <span class="c-dim">·</span> <span class="c-cyan">refactor-auth</span></div>
+            <div><span class="c-green">▓▓▓░░░░░░░</span> <span class="c-white">31%</span> <span class="c-dim">·</span> <span class="c-white">326K tokens</span> <span class="c-dim">·</span> <span class="c-white">$54.57</span> <span class="c-dim">·</span> <span class="c-white">1h33m</span> <span class="c-dim">·</span> <span class="c-white">4K/m</span> <span class="c-dim">·</span> <span class="c-green">+156</span><span class="c-red"> -23</span> <span class="c-dim">·</span> <span class="c-green">5hr: 23%</span> <span class="c-dim">↻16:30</span> <span class="c-dim">·</span> <span class="c-green">7d: 41%</span></div>
             <div><span class="c-cyan">…darshan/Personal/projects/ccm</span> <span class="c-dim">·</span> <span class="c-green">main</span> <span class="c-dim">· v1.0.80</span></div>
         </div>
         <div class="scenario-note">Rate limits appear automatically for Pro/Max plans. Green = safe, yellow = caution, red = near limit.</div>
@@ -252,8 +271,8 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
     <div class="scenario">
         <div class="scenario-title">Context warning — consider compacting (2-3 lines)</div>
         <div class="scenario-terminal">
-            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span></div>
-            <div><span class="c-yellow">▓▓▓▓▓▓▓▓░░</span> <span class="c-white">82%</span> <span class="c-dim">·</span> <span class="c-white">1.4M tokens</span> <span class="c-dim">·</span> <span class="c-white">$23.45</span> <span class="c-dim">·</span> <span class="c-white">2h15m</span> <span class="c-dim">·</span> <span class="c-white">10K/m</span> <span class="c-dim">·</span> <span class="c-red">5hr: 82%</span> <span class="c-dim">↻17:00</span></div>
+            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span> <span class="c-dim">·</span> <span class="c-cyan">refactor-auth</span></div>
+            <div><span class="c-yellow">▓▓▓▓▓▓▓▓░░</span> <span class="c-white">82%</span> <span class="c-dim">·</span> <span class="c-white">1.4M tokens</span> <span class="c-dim">·</span> <span class="c-white">$23.45</span> <span class="c-dim">·</span> <span class="c-white">2h15m</span> <span class="c-dim">·</span> <span class="c-white">10K/m</span> <span class="c-dim">·</span> <span class="c-green">+156</span><span class="c-red"> -23</span> <span class="c-dim">·</span> <span class="c-red">5hr: 82%</span> <span class="c-dim">↻17:00</span></div>
             <div><span class="c-cyan">…rs/darshan/AI/sozo-ai-chatbot</span> <span class="c-dim">·</span> <span class="c-green">main</span> <span class="c-dim">· v1.0.80</span> <span class="c-dim">·</span> <span class="c-yellow">⚠ /compact</span></div>
         </div>
         <div class="scenario-note">At 80%+ context, a ⚠ /compact warning appears. Quality degrades before auto-compact at ~85%.</div>
@@ -262,8 +281,8 @@ h1{font-size:28px;margin-bottom:8px;background:linear-gradient(135deg,#e2e8f0,#3
     <div class="scenario">
         <div class="scenario-title">Critical — near limits (3 lines, multi-account)</div>
         <div class="scenario-terminal">
-            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span></div>
-            <div><span class="c-red">▓▓▓▓▓▓▓▓▓░</span> <span class="c-white">92%</span> <span class="c-dim">·</span> <span class="c-white">1.8M tokens</span> <span class="c-dim">·</span> <span class="c-white">$67.89</span> <span class="c-dim">·</span> <span class="c-white">4h0m</span> <span class="c-dim">·</span> <span class="c-white">8K/m</span> <span class="c-dim">·</span> <span class="c-red">5hr: 91%</span> <span class="c-dim">↻18:30</span> <span class="c-dim">·</span> <span class="c-yellow">7d: 73%</span></div>
+            <div><span class="c-cyan">Opus 4.7</span> <span class="c-dim">·</span> <span class="c-yellow">high</span> <span class="c-dim">·</span> <span class="c-cyan">refactor-auth</span></div>
+            <div><span class="c-red">▓▓▓▓▓▓▓▓▓░</span> <span class="c-white">92%</span> <span class="c-dim">·</span> <span class="c-white">1.8M tokens</span> <span class="c-dim">·</span> <span class="c-white">$67.89</span> <span class="c-dim">·</span> <span class="c-white">4h0m</span> <span class="c-dim">·</span> <span class="c-white">8K/m</span> <span class="c-dim">·</span> <span class="c-green">+156</span><span class="c-red"> -23</span> <span class="c-dim">·</span> <span class="c-red">5hr: 91%</span> <span class="c-dim">↻18:30</span> <span class="c-dim">·</span> <span class="c-yellow">7d: 73%</span></div>
             <div><span class="c-cyan">…rs/darshan/AI/sozo-ai-chatbot</span> <span class="c-dim">·</span> <span class="c-green">main</span> <span class="c-dim">· v1.0.80</span> <span class="c-dim">·</span> <span class="c-yellow">⚠ /compact</span></div>
             <div><span class="c-cyan">work</span> <span class="c-dim">(darshan@company.com)</span> <span class="c-dim">·</span> <span class="c-white">3 accounts</span> <span class="c-dim">·</span> <span class="c-green">●</span></div>
         </div>
