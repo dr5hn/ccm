@@ -2,6 +2,14 @@
 
 All notable changes to CCM (Claude Code Manager) will be documented in this file.
 
+## [4.2.0] - 2026-04-25
+### Added
+- Statusline now shows the active model (display name) on its own line above the context bar.
+- Statusline shows /effort level next to the model, color-coded by intensity (low=dim, medium=green, high=yellow, xhigh/max=red). Hidden when the active model does not support reasoning effort.
+- Statusline shows the custom session name (set via --name or /rename) beside model + effort.
+- Statusline shows a +N -M indicator of total lines added/removed in the session, next to the burn rate.
+
+
 ## [4.1.0] - 2026-04-17
 ### Added
 - `ccm hook --isolated` — emit a shell hook that activates isolated CLAUDE_CONFIG_DIR profiles per shell on `cd` into a bound directory, instead of rewriting the global active account. Concurrent terminals in different bound directories no longer clobber each other's credentials.
