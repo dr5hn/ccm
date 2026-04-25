@@ -6,8 +6,11 @@ All notable changes to CCM (Claude Code Manager) will be documented in this file
 ### Added
 - Statusline now shows the active model (display name) on its own line above the context bar.
 - Statusline shows /effort level next to the model, color-coded by intensity (low=dim, medium=green, high=yellow, xhigh/max=red). Hidden when the active model does not support reasoning effort.
-- Statusline shows the custom session name (set via --name or /rename) beside model + effort.
-- Statusline shows a +N -M indicator of total lines added/removed in the session, next to the burn rate.
+- Statusline shows the custom session name (set via `--name` or `/rename`) beside model + effort.
+- Statusline shows a `+N -M` indicator of total lines added/removed in the session, next to the burn rate.
+
+### Fixed
+- Statusline rendering corruption when an optional JSON field (e.g. `seven_day` rate limit) was empty: bash `read` with `IFS=$'\t'` collapsed consecutive tabs and shifted later values (version, model, effort) into the wrong variables. Switched the `jq` extractor to ASCII Unit Separator (`\x1f`) so empty fields are preserved.
 
 
 ## [4.1.0] - 2026-04-17
